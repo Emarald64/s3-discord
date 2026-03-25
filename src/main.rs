@@ -3,7 +3,7 @@ use reqwest::{Client,header};
 use serde_json::{Map, Value};
 use std::fmt::Display;
 use std::str::FromStr;
-use anyhow::anyhow;
+use anyhow::{anyhow,bail};
 
 const API_KEY:&str="";
 
@@ -41,7 +41,8 @@ async fn main() -> anyhow::Result<()>{
                         match client.get(format!("https://stat.ink/api/v3/battle/{}",battles[i])).send().await{
                             Ok(res)=>{
                                 if let Value::Object(map)=res.json().await?{
-                                    let battle=Battle::from_map(map).ok_or(anyhow::anyhow!("Json parse error"))?;
+                                    let battle=Battle::from_map(map)?;
+                                    println!("{}",battle);
                                 }
                             }
                             Err(err)=>{
@@ -72,8 +73,6 @@ enum Mode{
     RainMaker,
     ClamBlitz,
 }
-
-struct ParseModeError;
 
 impl FromStr for Mode{
     type Err=anyhow::Error;
@@ -199,6 +198,106 @@ impl Display for Player{
     }
 }
 
+enum Stage{
+    BAndD,
+    Depot,
+    Springs,
+    Capital,
+    Alley,
+    Heights,
+    GrandArena,
+    Market,
+    Bridge,
+    Track,
+    Academy,
+    Hub,
+    Resort,
+    Mart,
+    Manta,
+    Airport,
+    Metalworks,
+    Museum,
+    RomEn,
+    Gorge,
+    Cargo,
+    Shipyard,
+    Ruins,
+    Spillway,
+    Underpass,
+    World
+}
+impl FromStr for Stage{
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use Stage::*;
+        match s{
+            "taraport"=>Ok(BAndD),
+            "negitoro"=>Ok(Depot),
+            "kusaya"=>Ok(Springs),
+            "takaashi"=>Ok(Capital),
+            "gonzui"=>Ok(Alley),
+            "hirame"=>Ok(Heights),
+            "grand_arena"=>Ok(GrandArena),
+            "yagara"=>Ok(Market),
+            "masaba"=>Ok(Bridge),
+            "kombu"=>Ok(Track),
+            "amabi"=>Ok(Academy),
+            "ryugu"=>Ok(Hub),
+            "mahimahi"=>Ok(Resort),
+            "zatou"=>Ok(Mart),
+            "manta"=>Ok(Manta),
+            "kajiki"=>Ok(Airport),
+            "namero"=>Ok(Metalworks),
+            "kinmedai"=>Ok(Museum),
+            "baigai"=>Ok(RomEn),
+            "yunohana"=>Ok(Gorge),
+            "ohyo"=>Ok(Cargo),
+            "chozame"=>Ok(Shipyard),
+            "nampla"=>Ok(Ruins),
+            "mategai"=>Ok(Spillway),
+            "decaline"=>Ok(Underpass),
+            "sumeshi"=>Ok(World),
+            _=>bail!("Invalid Stage"),
+        }
+    }
+}
+
+impl Display for Stage{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use Stage::*;
+        f.write_str(
+            match self{
+                BAndD=>"Barnacle & Dime",
+                Depot=>"Bluefin Depot",
+                Springs=>"Brinewater Springs",
+                Capital=>"Crableg Capital",
+                Alley=>"Eeltail Alley",
+                Heights=>"Flounder Heights",
+                GrandArena=>"Grand Splatlands Bowl",
+                Market=>"Hagglefish Market",
+                Bridge=>"Hammerhead Bridge",
+                Track=>"Humpback Pump Track",
+                Academy=>"Inkblot Art Academy",
+                Hub=>"Lemuria Hub",
+                Resort=>"Mahi-Mahi Resort",
+                Mart=>"MakoMart",
+                Manta=>"Manta Maria",
+                Airport=>"Marlin Airport",
+                Metalworks=>"Mincemeat Metalworks",
+                Museum=>"Museum d'Alfonsino",
+                RomEn=>"Robo ROM-en",
+                Gorge=>"Scorch Gorge",
+                Cargo=>"Shipshape Cargo Co.",
+                Shipyard=>"Sturgeon Shipyard",
+                Ruins=>"Um'ami Ruins",
+                Spillway=>"Undertow Spillway",
+                Underpass=>"Urchin Underpass",
+                World=>"Wahoo World",
+            }
+        )
+    }
+}
+
 enum BattleResult{
     Win,
     Lose,
@@ -234,7 +333,8 @@ struct Battle{
     uuid:String,
     lobby:String,
     mode:Mode,
-    stage:String,
+    stage:Stage,
+    result:BattleResult,
     our_score:u8,
     their_score:u8,
     our_players:Vec<Player>,
@@ -244,60 +344,69 @@ struct Battle{
 }
 impl Battle{
     fn from_map(map:Map<String,Value>)->anyhow::Result<Self>{
-        let mode=match map.get("mode")?{
-            Value::String(string)=>Mode::from_str(string)?,
-            _=>return None,
+        let mode=match map.get("mode"){
+            Some(Value::String(string))=>Mode::from_str(string)?,
+            _=>bail!("Failed to find mode"),
         };
         Ok(Battle { 
-            uuid: match map.get("uuid")?{
-                Value::String(string)=>string.clone(),
-                _=>return None,
+            uuid: match map.get("uuid"){
+                Some(Value::String(string))=>string.clone(),
+                _=>bail!("failed to find uuid"),
             },
-            stage:match map.get("stage")?{
-                Value::String(string)=>string.clone(),
-                _=>return None,
+            stage:match map.get("stage"){
+                Some(Value::String(string))=>string.parse()?,
+                _=>bail!("Failed to find stage"),
             }, 
-            lobby:match map.get("lobby")?{
-                Value::String(string)=>string.clone(),
-                _=>return None,
+            lobby:match map.get("lobby"){
+                Some(Value::String(string))=>string.clone(),
+                _=>bail!("Failed to find lobby"),
+            },
+            result:match map.get("result"){
+                Some(Value::String(s))=>s.parse()?,
+                _=>bail!("Failed to find result"),
             },
             our_score: 
                 match map.get(match mode {
                     Mode::TurfWar=>"our_team_percent",
                         _=>"our_team_count",
-                    })?
+                    })
                     {
-                        Value::Number(number)=>number.as_u64()? as u8,
-                        _=>return None,
-                    } 
-                    , 
-                    their_score: 
-                    match map.get(match mode {
-                        Mode::TurfWar=>"their_team_percent",
-                        _=>"their_team_count",
-                    })?
-                    {
-                    Value::Number(number)=>number.as_u64()? as u8,
-                    _=>return None,
-                } , 
-            mode: mode,
-            our_players: match map.get("our_team_players")?{
-                    Value::Array(players)=>players.iter().filter_map(|player|{
-                        match player{
-                            Value::Object(player)=>Player::from_map(player),
-                            _=>return None,
-                        }
-                    }).collect::<Vec<_>>(),
-                _=>return None,
+                        Some(Value::Number(number))=>match number.as_u64(){
+                            Some(n)=>n as u8,
+                            None=>bail!("their score too high"),
+                        },
+                        _=>bail!("Failed to find our score"),
+                    }, 
+            their_score: 
+                match map.get(match mode {
+                    Mode::TurfWar=>"their_team_percent",
+                    _=>"their_team_count",
+                })
+                {
+                Some(Value::Number(number))=>match number.as_u64(){
+                    Some(n)=>n as u8,
+                    None=>bail!("their score too high"),
+                },
+                _=>bail!("Failed to find their score"),
             }, 
-            their_players: match map.get("their_team_players")?{
-                    Value::Array(players)=>players.iter().filter_map(|player|{
+            mode: mode,
+            our_players: match map.get("our_team_players"){
+                    Some(Value::Array(players))=>players.iter().filter_map(|player|{
                         match player{
                             Value::Object(player)=>Player::from_map(player),
                             _=>return None,
                         }
                     }).collect::<Vec<_>>(),
-                _=>return None,
+                _=>bail!("Failed to find our players"),
+            }, 
+            their_players: match map.get("their_team_players"){
+                Some(Value::Array(players))=>players.iter().filter_map(|player|{
+                        match player{
+                            Value::Object(player)=>Player::from_map(player),
+                            _=>return None,
+                        }
+                }).collect::<Vec<_>>(),
+                _=>bail!("Failed to find their players"),
             },  
             // start_time: match map.get("start_time")?{
             //     Value::Number(n)=>n.as_u64()?,
@@ -311,8 +420,11 @@ impl Battle{
     }
 }
 
+
 impl Display for Battle{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,"{0} : {1}",self.mode,self.stage)
+        let our_players=self.our_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
+        let their_players=self.their_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
+        write!(f,"{0} : {1}\n{6}   {2}-{3}\nOur Players\n{4}Their Players{5}",self.mode,self.stage,self.our_score,self.their_score,our_players,their_players,self.result)
     }
 }
