@@ -1,6 +1,9 @@
 use tokio;
 use reqwest::{Client,header};
 use serde_json::{Map, Value};
+use std::fmt::Display;
+use std::str::FromStr;
+use anyhow::anyhow;
 
 const API_KEY:&str="";
 
@@ -35,7 +38,16 @@ async fn main() -> anyhow::Result<()>{
                         }   
                     }{
                         // get battle log
-                        // client.get(format!("https://stat.ink/api/v3/battle/{}",battles[i]))
+                        match client.get(format!("https://stat.ink/api/v3/battle/{}",battles[i])).send().await{
+                            Ok(res)=>{
+                                if let Value::Object(map)=res.json().await?{
+                                    let battle=Battle::from_map(map).ok_or(anyhow::anyhow!("Json parse error"))?;
+                                }
+                            }
+                            Err(err)=>{
+                                println!("error: {}",err);
+                            }
+                        }
                     }
                     most_recent_battle=Some(battles[0]);
                 }
@@ -53,7 +65,6 @@ async fn main() -> anyhow::Result<()>{
 }
 
 
-
 enum Mode{
     TurfWar,
     TowerControl,
@@ -61,15 +72,31 @@ enum Mode{
     RainMaker,
     ClamBlitz,
 }
-impl Mode{
-    fn from_str(s:&str)->Option<Self>{
+
+struct ParseModeError;
+
+impl FromStr for Mode{
+    type Err=anyhow::Error;
+    fn from_str(s:&str)->Result<Self,Self::Err>{
         match s{
-            "nawabari"=>Some(Mode::TurfWar),
-            "area"=>Some(Mode::TurfWar),
-            "hoko"=>Some(Mode::RainMaker),
-            "yagura"=>Some(Mode::TowerControl),
-            "asari"=>Some(Mode::ClamBlitz),
-            _=>None,
+            "nawabari"=>Ok(Mode::TurfWar),
+            "area"=>Ok(Mode::SplatZones),
+            "hoko"=>Ok(Mode::RainMaker),
+            "yagura"=>Ok(Mode::TowerControl),
+            "asari"=>Ok(Mode::ClamBlitz),
+            _=>Err(anyhow!("failed to parse mode")),
+        }
+    }
+}
+
+impl Display for Mode{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self{
+            Self::TurfWar=>f.write_str("Turf War"),
+            Self::SplatZones=>f.write_str("Splat Zones"),
+            Self::RainMaker=>f.write_str("Rainmaker"),
+            Self::TowerControl=>f.write_str("Tower Conrol"),
+            Self::ClamBlitz=>f.write_str("Clam Blitz"),
         }
     }
 }
@@ -166,8 +193,46 @@ impl Player{
     }
 }
 
+impl Display for Player{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f,"{0} K:{1} A:{2} D:{3} S:{4} {5}p",self.name,self.kills,self.assists,self.deaths,self.specials,self.turf_inked)
+    }
+}
+
+enum BattleResult{
+    Win,
+    Lose,
+    Draw,
+    ExemptedLose,
+}
+
+impl FromStr for BattleResult{
+    type Err=anyhow::Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s{
+            "win"=>Ok(Self::Win),
+            "lose"=>Ok(Self::Lose),
+            "draw"=>Ok(Self::Draw),
+            "exempted_lose"=>Ok(Self::ExemptedLose),
+            _=>Err(anyhow!("Invalid game result"))
+        }
+    }
+}
+
+impl Display for BattleResult{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self{
+            Self::Win=>f.write_str("Win"),
+            Self::Lose=>f.write_str("Lose"),
+            Self::Draw=>f.write_str("Draw"),
+            Self::ExemptedLose=>f.write_str("Exempted Loss")
+        }
+    }
+}
+
 struct Battle{
     uuid:String,
+    lobby:String,
     mode:Mode,
     stage:String,
     our_score:u8,
@@ -178,12 +243,12 @@ struct Battle{
     // end_time:u64,
 }
 impl Battle{
-    fn from_map(map:Map<String,Value>)->Option<Self>{
+    fn from_map(map:Map<String,Value>)->anyhow::Result<Self>{
         let mode=match map.get("mode")?{
             Value::String(string)=>Mode::from_str(string)?,
             _=>return None,
         };
-        Some(Battle { 
+        Ok(Battle { 
             uuid: match map.get("uuid")?{
                 Value::String(string)=>string.clone(),
                 _=>return None,
@@ -192,6 +257,10 @@ impl Battle{
                 Value::String(string)=>string.clone(),
                 _=>return None,
             }, 
+            lobby:match map.get("lobby")?{
+                Value::String(string)=>string.clone(),
+                _=>return None,
+            },
             our_score: 
                 match map.get(match mode {
                     Mode::TurfWar=>"our_team_percent",
@@ -239,5 +308,11 @@ impl Battle{
             //     _=>return None,
             // }, 
         })
+    }
+}
+
+impl Display for Battle{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f,"{0} : {1}",self.mode,self.stage)
     }
 }
