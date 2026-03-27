@@ -1,67 +1,77 @@
 use tokio;
-use reqwest::{Client,header};
+use notify::{self,Event, Watcher,EventKind,event};
+// use reqwest::{Client,header};
 use serde_json::{Map, Value};
 use std::fmt::Display;
 use std::str::FromStr;
 use anyhow::{anyhow,bail};
+use std::{sync::mpsc,path::Path,fs::File};
 
-const API_KEY:&str="";
+const S3S_RESULTS_DIR:&str="";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()>{
-    //setup reqwest for stats.ink
-    let mut headers=header::HeaderMap::new();
-    let mut auth_value=header::HeaderValue::from_str(API_KEY)?;
-    auth_value.set_sensitive(true);
-    headers.insert(header::AUTHORIZATION, auth_value);
-    let client=Client::builder()
-        // .default_headers(headers)
-        .build()?;
-    let mut most_recent_battle:Option<&str>=None;
+    //setup notify to check s3s results folder
+    // let (tx,rx)=mpsc::channel::<notify::Result<Event>>();
+    // let mut watcher = notify::recommended_watcher(tx)?;
+    // watcher.watch(Path::new(S3S_RESULTS_DIR), notify::RecursiveMode::NonRecursive)?;
     // loop{
-        // wait
-        // check stats.ink battle log
-        match client.get("https://stat.ink/api/v3/s3s/uuid-list?lobby=private").bearer_auth(API_KEY).send().await{
-            Ok(res)=>{
-                if let Value::Array(battles)=res.json().await?{
-                    let battles:Vec<&String>=battles.iter().filter_map(|value|{
-                        match value {
-                            Value::String(uuid)=>Some(uuid),
-                            _=>None,
-                        }
-                    }).collect();
-                    let mut i=0;
-                    while i<battles.len() && {
-                        match most_recent_battle{
-                            Some(uuid)=>battles[i]!=uuid,
-                            _=>true
-                        }   
-                    }{
-                        // get battle log
-                        match client.get(format!("https://stat.ink/api/v3/battle/{}",battles[i])).send().await{
-                            Ok(res)=>{
-                                if let Value::Object(map)=res.json().await?{
-                                    let battle=Battle::from_map(map)?;
-                                    println!("{}",battle);
-                                }
-                            }
-                            Err(err)=>{
-                                println!("error: {}",err);
-                            }
-                        }
-                    }
-                    most_recent_battle=Some(battles[0]);
+    //     // wait for new log
+    //     match rx.recv(){
+    //         Ok(Ok(event))=>if let EventKind::Access(event::AccessKind::Close(_))=event.kind{
+                // let path=event.paths[0].as_path();
+                let path="/home/agiller/.config/s3s/exports/results/20260310T205332Z.json";
+                let file=File::open(path)?;
+                if let Value::Object(battle)=serde_json::from_reader(file)?{
+                    let battle=Battle::from_map(battle)?;
+                    println!("{}",battle);
                 }
-            }
-            Err(err)=>{
-                println!("error: {}",err);
-            }
-        };
-        Ok(())
-    
+        //     },
+        //     Ok(Err(e))=>println!("watch error: {:?}", e),
+        //     Err(e)=>bail!(e)
+        // };
+        // check stats.ink battle log
+        // match client.get("https://stat.ink/api/v3/s3s/uuid-list?lobby=private").bearer_auth(API_KEY).send().await{
+        //     Ok(res)=>{
+        //         if let Value::Array(battles)=res.json().await?{
+        //             let battles:Vec<&String>=battles.iter().filter_map(|value|{
+        //                 match value {
+        //                     Value::String(uuid)=>Some(uuid),
+        //                     _=>None,
+        //                 }
+        //             }).collect();
+        //             let mut i=0;
+        //             while i<battles.len() && {
+        //                 match most_recent_battle{
+        //                     Some(uuid)=>battles[i]!=uuid,
+        //                     _=>true
+        //                 }   
+        //             }{
+        //                 // get battle log
+        //                 match client.get(format!("https://stat.ink/api/v3/battle/{}",battles[i])).send().await{
+        //                     Ok(res)=>{
+        //                         if let Value::Object(map)=res.json().await?{
+        //                             let battle=Battle::from_map(map)?;
+        //                             println!("{}",battle);
+        //                         }
+        //                     }
+        //                     Err(err)=>{
+        //                         println!("error: {}",err);
+        //                     }
+        //                 }
+        //             }
+        //             most_recent_battle=Some(battles[0]);
+        //         }
+        //     }
+        //     Err(err)=>{
+        //         println!("error: {}",err);
+        //     }
+        
         // parse log
-    
+        
         // post log to discord
+        Ok(())
+    // }
     // }
 }
 
@@ -115,79 +125,91 @@ struct Player{
     me:bool,
     name:String,
     turf_inked:u16,
-    rank:u8,
+    // rank:u8,
+    weapon:String,
     kills:u8,
     assists:u8,
     deaths:u8,
     specials:u8,
-    gears:Vec<Gear>,
+    // gears:Vec<Gear>,
 }
 
 impl Player{
-    fn from_map(map:&Map<String,Value>)->Option<Self>{
-        Some(Player{
-            me:if let Some(Value::String(s)) = map.get("me") {s=="yes"} else {false},
-            name:match map.get("name")?{
-                Value::String(n)=>n.clone(),
-                _=>return None,
+    fn from_map(map:&Map<String,Value>)->anyhow::Result<Self>{
+        let result=match map.get("result"){
+            Some(Value::Object(map))=>map,
+            _=>bail!("Failed to get player result"),
+        };
+        Ok(Player{
+            me:if let Some(Value::Bool(me)) = map.get("isMyself") {*me} else {false},
+            name:match map.get("name"){
+                Some(Value::String(n))=>n.clone(),
+                _=>bail!("Failed to get player name"),
             },
-            turf_inked:match map.get("inked")?{
-                Value::Number(n)=>n.as_u64()? as u16,
-                _=>return None,
+            turf_inked:match map.get("paint"){
+                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("too much paint"))? as u16,
+                _=>bail!("Failed to get player paint"),
             },
-            rank:match map.get("rank_in_team")?{
-                Value::Number(n)=>n.as_u64()? as u8,
-                _=>return None,
-            },
-            kills:match map.get("kill")?{
-                Value::Number(n)=>n.as_u64()? as u8,
-                _=>return None,
-            },
-            assists:match map.get("assist")?{
-                Value::Number(n)=>n.as_u64()? as u8,
-                _=>return None,
-            },
-            deaths:match map.get("death")?{
-                Value::Number(n)=>n.as_u64()? as u8,
-                _=>return None,
-            },
-            specials:match map.get("special")?{
-                Value::Number(n)=>n.as_u64()? as u8,
-                _=>return None,
-            },
-            gears:match map.get("gears"){
-                Some(Value::Object(gears))=>{
-                    gears.values().map_while(|gear|{
-                        if let Value::Object(gear)=gear{
-                            Some(Gear{
-                                primary_ability:
-                                    match gear.get("primary_ability"){
-                                        Some(Value::String(ability))=>ability.clone(),
-                                        _=>{
-                                            return None
-                                        }
-                                    },
-                                secondary_abilities:
-                                    match gear.get("secondary_abilities"){
-                                        Some(Value::Array(abilities))=>abilities.iter().map_while(|ability|{
-                                            match ability{
-                                                Value::String(ability)=>Some(Some(ability.clone())),
-                                                Value::Null=>Some(None),
-                                                _=>None,
-                                            }
-                                        }).collect(),
-                                        _=>{
-                                            return None
-                                        }
-                                    }
-                            })
-                        }else{
-                            return None
-                        }
-                    }).collect()
+            // rank:match map.get("rank_in_team")?{
+            //     Value::Number(n)=>n.as_u64()? as u8,
+            //     _=>return None,
+            // },
+            weapon:match map.get("weapon"){
+                Some(Value::Object(weapon))=>match weapon.get("name"){
+                    Some(Value::String(name))=>name.clone(),
+                    _=>bail!("Failed to get weapon name")
                 },
-                _=>return None,
+                _=>bail!("Failed to get weapon")
             },
+            kills:match result.get("kill"){
+                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("too many kills"))? as u8,
+                _=>bail!("Failed to get kills"),
+            },
+            assists:match result.get("assist"){
+                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("too many assists"))? as u8,
+                _=>bail!("Failed to get assits"),
+            },
+            deaths:match result.get("death"){
+                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("too many deaths"))? as u8,
+                _=>bail!("Failed to get deaths"),
+            },
+            specials:match result.get("special"){
+                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("too many specials"))? as u8,
+                _=>bail!("Failed to get specials"),
+            },
+            // gears:match map.get("gears"){
+            //     Some(Value::Object(gears))=>{
+            //         gears.values().map_while(|gear|{
+            //             if let Value::Object(gear)=gear{
+            //                 Some(Gear{
+            //                     primary_ability:
+            //                         match gear.get("primary_ability"){
+            //                             Some(Value::String(ability))=>ability.clone(),
+            //                             _=>{
+            //                                 return None
+            //                             }
+            //                         },
+            //                     secondary_abilities:
+            //                         match gear.get("secondary_abilities"){
+            //                             Some(Value::Array(abilities))=>abilities.iter().map_while(|ability|{
+            //                                 match ability{
+            //                                     Value::String(ability)=>Some(Some(ability.clone())),
+            //                                     Value::Null=>Some(None),
+            //                                     _=>None,
+            //                                 }
+            //                             }).collect(),
+            //                             _=>{
+            //                                 return None
+            //                             }
+            //                         }
+            //                 })
+            //             }else{
+            //                 return None
+            //             }
+            //         }).collect()
+            //     },
+            //     _=>bail!("failed to find gears"),
+            // },
         })
     }
 }
@@ -231,7 +253,7 @@ impl FromStr for Stage{
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use Stage::*;
         match s{
-            "taraport"=>Ok(BAndD),
+            "Barnacle & Dime"=>Ok(BAndD),
             "negitoro"=>Ok(Depot),
             "kusaya"=>Ok(Springs),
             "takaashi"=>Ok(Capital),
@@ -330,10 +352,10 @@ impl Display for BattleResult{
 }
 
 struct Battle{
-    uuid:String,
-    lobby:String,
+    // uuid:String,
+    // lobby:String,
     mode:Mode,
-    stage:Stage,
+    stage:String,
     result:BattleResult,
     our_score:u8,
     their_score:u8,
@@ -344,70 +366,37 @@ struct Battle{
 }
 impl Battle{
     fn from_map(map:Map<String,Value>)->anyhow::Result<Self>{
-        let mode=match map.get("mode"){
-            Some(Value::String(string))=>Mode::from_str(string)?,
+        let map=map.get("data").ok_or(anyhow!("failed to get data"))?.get("vsHistoryDetail").ok_or(anyhow!("failed to get vsHistory"))?;
+        let mode=match map.get("vsRule"){
+            Some(Value::Object(mode))=>match mode.get("rule"){
+                Some(Value::String(code))=>code.to_lowercase().parse()?,
+                _=>bail!("failed to find mode"),
+            },
             _=>bail!("Failed to find mode"),
         };
         Ok(Battle { 
-            uuid: match map.get("uuid"){
-                Some(Value::String(string))=>string.clone(),
-                _=>bail!("failed to find uuid"),
-            },
-            stage:match map.get("stage"){
-                Some(Value::String(string))=>string.parse()?,
-                _=>bail!("Failed to find stage"),
-            }, 
-            lobby:match map.get("lobby"){
-                Some(Value::String(string))=>string.clone(),
-                _=>bail!("Failed to find lobby"),
-            },
-            result:match map.get("result"){
-                Some(Value::String(s))=>s.parse()?,
+            // uuid: match map.get("uuid"){
+            //     Some(Value::String(string))=>string.clone(),
+            //     _=>bail!("failed to find uuid"),
+            // },
+            stage:String::from(map.get("vsStage").ok_or(anyhow!("Failed to find stage"))?.get("name").ok_or(anyhow!("Failed to get stage name"))?.as_str().ok_or(anyhow!("Stage name is not string"))?),
+            // lobby:match map.get("lobby"){
+            //     Some(Value::String(string))=>string.clone(),
+            //     _=>bail!("Failed to find lobby"),
+            // },
+            result:match map.get("judgement"){
+                Some(Value::String(s))=>s.to_lowercase().parse()?,
                 _=>bail!("Failed to find result"),
             },
-            our_score: 
-                match map.get(match mode {
-                    Mode::TurfWar=>"our_team_percent",
-                        _=>"our_team_count",
-                    })
-                    {
-                        Some(Value::Number(number))=>match number.as_u64(){
-                            Some(n)=>n as u8,
-                            None=>bail!("their score too high"),
-                        },
-                        _=>bail!("Failed to find our score"),
-                    }, 
-            their_score: 
-                match map.get(match mode {
-                    Mode::TurfWar=>"their_team_percent",
-                    _=>"their_team_count",
-                })
-                {
-                Some(Value::Number(number))=>match number.as_u64(){
-                    Some(n)=>n as u8,
-                    None=>bail!("their score too high"),
-                },
-                _=>bail!("Failed to find their score"),
-            }, 
+            our_score: map.get("myTeam").ok_or(anyhow!("Couldn't find my team"))?.get("result").ok_or(anyhow!("Couldn't find our result"))?.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().unwrap() as u8,
+            their_score: map.get("otherTeams").ok_or(anyhow!("Couldn't find my team"))?.get(0).unwrap().get("result").ok_or(anyhow!("Couldn't find our result"))?.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().unwrap() as u8,
             mode: mode,
-            our_players: match map.get("our_team_players"){
-                    Some(Value::Array(players))=>players.iter().filter_map(|player|{
-                        match player{
-                            Value::Object(player)=>Player::from_map(player),
-                            _=>return None,
-                        }
-                    }).collect::<Vec<_>>(),
-                _=>bail!("Failed to find our players"),
-            }, 
-            their_players: match map.get("their_team_players"){
-                Some(Value::Array(players))=>players.iter().filter_map(|player|{
-                        match player{
-                            Value::Object(player)=>Player::from_map(player),
-                            _=>return None,
-                        }
-                }).collect::<Vec<_>>(),
-                _=>bail!("Failed to find their players"),
-            },  
+            our_players: map.get("myTeam").ok_or(anyhow!("couldn't find our team"))?.get("players").ok_or(anyhow!("couldn't get our players"))?.as_array().unwrap().iter().filter_map(|player|{
+                Player::from_map(player.as_object()?).ok()
+            }).collect(), 
+            their_players:map.get("otherTeams").ok_or(anyhow!("Couldn't find my team"))?.get(0).unwrap().get("players").ok_or(anyhow!("couldn't get their players"))?.as_array().unwrap().iter().filter_map(|player|{
+                Player::from_map(player.as_object()?).ok()
+            }).collect(), 
             // start_time: match map.get("start_time")?{
             //     Value::Number(n)=>n.as_u64()?,
             //     _=>return None,
@@ -425,6 +414,6 @@ impl Display for Battle{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let our_players=self.our_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
         let their_players=self.their_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
-        write!(f,"{0} : {1}\n{6}   {2}-{3}\nOur Players\n{4}Their Players{5}",self.mode,self.stage,self.our_score,self.their_score,our_players,their_players,self.result)
+        write!(f,"{0} : {1}\n{6}:  {2}-{3}\n\nOur Players:\n{4}\nTheir Players:\n{5}",self.mode,self.stage,self.our_score,self.their_score,our_players,their_players,self.result)
     }
 }
