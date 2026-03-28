@@ -7,6 +7,8 @@ use std::str::FromStr;
 use anyhow::{anyhow,bail};
 use std::{sync::mpsc,path::Path,fs::File};
 
+use serenity::{all::Builder, builder::{self, CreateEmbed, CreateMessage}, model::Timestamp};
+
 const S3S_RESULTS_DIR:&str="/home/agiller/.config/s3s/exports/results/";
 
 #[tokio::main]
@@ -36,6 +38,17 @@ async fn main() -> anyhow::Result<()>{
     };
 }
 
+fn embedFromBattle(battle:&Battle)->CreateEmbed{
+    CreateEmbed::default()
+    .timestamp(Timestamp::parse(&battle.timestamp).expect("failed to parse timestamp"))
+    .image(&battle.stage.image_url)
+    .title(format!("{}:{}   {}",&battle.mode,&battle.stage.name,&battle.result))
+    .description(format!("{}",&battle))
+}
+
+async fn send_battle(battle:&Battle){
+    CreateMessage::new().embed(embedFromBattle(battle)).execute(cache_http, ctx)
+}
 
 enum Mode{
     TurfWar,
