@@ -1,18 +1,25 @@
 use tokio;
-use notify::{self,Event, Watcher,EventKind,event};
+use notify::{self, Event, EventKind, Watcher, event};
 // use reqwest::{Client,header};
 use serde_json::{Map, Value};
 use std::{fmt::Display};
 use std::str::FromStr;
 use anyhow::{anyhow,bail};
 use std::{sync::mpsc,path::Path,fs::File};
+use std::env;
 
-use serenity::{all::Builder, builder::{self, CreateEmbed, CreateMessage}, model::Timestamp};
+use serenity::{builder::{CreateEmbed, CreateMessage}, model::{Timestamp,id::ChannelId}};
+use serenity::prelude::*;
 
 const S3S_RESULTS_DIR:&str="/home/agiller/.config/s3s/exports/results/";
+const SEND_CHANNEL_ID:ChannelId=ChannelId::new(1481734356832882852);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()>{
+    //setup discord
+    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    let intents=GatewayIntents::GUILD_MESSAGES;
+    let mut client=Client::builder(&token, intents).await?;
     //setup notify to check s3s results folder
     let (tx,rx)=mpsc::channel::<notify::Result<Event>>();
     let mut watcher = notify::recommended_watcher(tx)?;
@@ -24,12 +31,15 @@ async fn main() -> anyhow::Result<()>{
                 let path=event.paths[0].as_path();
                 println!("scanning file at {}",path.to_string_lossy());
                 // let path="/home/agiller/.config/s3s/exports/results/20260310T205332Z.json";
-                let file=File::open(path)?;
+                let file=File::open(path).expect("invalid file path");
                 if let Value::Object(battle)=serde_json::from_reader(file)?{
+                    println!("parsing battle");
                     let battle=Battle::from_map(battle)?;
+                    println!("parsed battle");
                     println!("{}",battle);
 
                     // post log to discord
+                    SEND_CHANNEL_ID.send_message(&client.http, message_from_battle(&battle)).await?;
                 }
             },
             Ok(Err(e))=>println!("watch error: {:?}", e),
@@ -38,16 +48,15 @@ async fn main() -> anyhow::Result<()>{
     };
 }
 
-fn embedFromBattle(battle:&Battle)->CreateEmbed{
-    CreateEmbed::default()
-    .timestamp(Timestamp::parse(&battle.timestamp).expect("failed to parse timestamp"))
-    .image(&battle.stage.image_url)
-    .title(format!("{}:{}   {}",&battle.mode,&battle.stage.name,&battle.result))
-    .description(format!("{}",&battle))
-}
 
-async fn send_battle(battle:&Battle){
-    CreateMessage::new().embed(embedFromBattle(battle)).execute(cache_http, ctx)
+fn message_from_battle(battle:&Battle)->CreateMessage{
+    CreateMessage::default().add_embed(
+        CreateEmbed::default()
+        .timestamp(&battle.timestamp)
+        .image(&battle.stage.image_url)
+        .title(format!("{2}: {0} - {1}",battle.mode,&battle.stage.name,&battle.result))
+        .description(format!("{}",battle))
+    )
 }
 
 enum Mode{
@@ -195,6 +204,7 @@ enum BattleResult{
     Lose,
     Draw,
     ExemptedLose,
+    Unknown,
 }
 
 impl FromStr for BattleResult{
@@ -205,7 +215,7 @@ impl FromStr for BattleResult{
             "lose"=>Ok(Self::Lose),
             "draw"=>Ok(Self::Draw),
             "exempted_lose"=>Ok(Self::ExemptedLose),
-            _=>Err(anyhow!("Invalid game result"))
+            _=>Ok(Self::Unknown)
         }
     }
 }
@@ -216,7 +226,8 @@ impl Display for BattleResult{
             Self::Win=>f.write_str("Win"),
             Self::Lose=>f.write_str("Lose"),
             Self::Draw=>f.write_str("Draw"),
-            Self::ExemptedLose=>f.write_str("Exempted Loss")
+            Self::ExemptedLose=>f.write_str("Exempted Loss"),
+            Self::Unknown=>f.write_str("Unknown"),
         }
     }
 }
@@ -234,6 +245,7 @@ struct Battle{
     duration:u16,
     // start_time:u64,
     // end_time:u64,
+    timestamp:Timestamp,
 }
 impl Battle{
     fn from_map(map:Map<String,Value>)->anyhow::Result<Self>{
@@ -270,14 +282,14 @@ impl Battle{
             our_score:{
                 let result=our_team.get("result").ok_or(anyhow!("Couldn't find our result"))?;
                 match mode{
-                    Mode::TurfWar=>(result.get("paintRatio").ok_or(anyhow!("counldn't get our paint"))?.as_f64().unwrap()*100.0) as u8,
+                    Mode::TurfWar=>result.get("paintRatio").map_or(0,|paint|{(paint.as_f64().unwrap()*100.0) as u8}),
                     _=>result.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().unwrap() as u8,
                 } 
             },
             their_score: {
                 let result=their_team.get("result").ok_or(anyhow!("Couldn't find our result"))?;
                 match mode{
-                    Mode::TurfWar=>(result.get("paintRatio").ok_or(anyhow!("counldn't get our paint"))?.as_f64().unwrap()*100.0) as u8,
+                    Mode::TurfWar=>result.get("paintRatio").map_or(0,|paint|{(paint.as_f64().unwrap()*100.0) as u8}),
                     _=>result.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().unwrap() as u8,
                 } 
             },
@@ -288,7 +300,7 @@ impl Battle{
             their_players:their_team.get("players").ok_or(anyhow!("couldn't get their players"))?.as_array().unwrap().iter().filter_map(|player|{
                 Player::from_map(player.as_object()?).ok()
             }).collect(), 
-            duration:map.get("duration").ok_or(anyhow!("Failed to get duration"))?.as_u64().ok_or(anyhow!("duration is not integer"))? as u16
+            duration:map.get("duration").ok_or(anyhow!("Failed to get duration"))?.as_u64().ok_or(anyhow!("duration is not integer"))? as u16,
             // start_time: match map.get("start_time")?{
             //     Value::Number(n)=>n.as_u64()?,
             //     _=>return None,
@@ -297,6 +309,7 @@ impl Battle{
             //     Value::Number(n)=>n.as_u64()?,
             //     _=>return None,
             // }, 
+            timestamp:String::from(map.get("playedTime").ok_or(anyhow!("failed to get playedTime"))?.as_str().ok_or(anyhow!("playedTime not string"))?).parse()?,
         })
     }
 }
