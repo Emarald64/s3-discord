@@ -2,7 +2,7 @@ use tokio;
 use notify::{self,Event, Watcher,EventKind,event};
 // use reqwest::{Client,header};
 use serde_json::{Map, Value};
-use std::fmt::Display;
+use std::{fmt::Display};
 use std::str::FromStr;
 use anyhow::{anyhow,bail};
 use std::{sync::mpsc,path::Path,fs::File};
@@ -88,11 +88,11 @@ impl FromStr for Mode{
     type Err=anyhow::Error;
     fn from_str(s:&str)->Result<Self,Self::Err>{
         match s{
-            "nawabari"=>Ok(Mode::TurfWar),
-            "area"=>Ok(Mode::SplatZones),
-            "hoko"=>Ok(Mode::RainMaker),
-            "yagura"=>Ok(Mode::TowerControl),
-            "asari"=>Ok(Mode::ClamBlitz),
+            "Turf War"=>Ok(Mode::TurfWar),
+            "Splat Zones"=>Ok(Mode::SplatZones),
+            "Rainmaker"=>Ok(Mode::RainMaker),
+            "Tower Conrol"=>Ok(Mode::TowerControl),
+            "Clam Blitz"=>Ok(Mode::ClamBlitz),
             _=>Err(anyhow!("failed to parse mode")),
         }
     }
@@ -216,107 +216,19 @@ impl Player{
 
 impl Display for Player{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,"{0} K:{1} A:{2} D:{3} S:{4} {5}p",self.name,self.kills,self.assists,self.deaths,self.specials,self.turf_inked)
+        write!(f,"{0:10} K:{1:2} A:{2:2} D:{3:2} S:{4:2} {5:4}p",self.name,self.kills,self.assists,self.deaths,self.specials,self.turf_inked)
     }
 }
 
-enum Stage{
-    BAndD,
-    Depot,
-    Springs,
-    Capital,
-    Alley,
-    Heights,
-    GrandArena,
-    Market,
-    Bridge,
-    Track,
-    Academy,
-    Hub,
-    Resort,
-    Mart,
-    Manta,
-    Airport,
-    Metalworks,
-    Museum,
-    RomEn,
-    Gorge,
-    Cargo,
-    Shipyard,
-    Ruins,
-    Spillway,
-    Underpass,
-    World
-}
-impl FromStr for Stage{
-    type Err = anyhow::Error;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use Stage::*;
-        match s{
-            "Barnacle & Dime"=>Ok(BAndD),
-            "negitoro"=>Ok(Depot),
-            "kusaya"=>Ok(Springs),
-            "takaashi"=>Ok(Capital),
-            "gonzui"=>Ok(Alley),
-            "hirame"=>Ok(Heights),
-            "grand_arena"=>Ok(GrandArena),
-            "yagara"=>Ok(Market),
-            "masaba"=>Ok(Bridge),
-            "kombu"=>Ok(Track),
-            "amabi"=>Ok(Academy),
-            "ryugu"=>Ok(Hub),
-            "mahimahi"=>Ok(Resort),
-            "zatou"=>Ok(Mart),
-            "manta"=>Ok(Manta),
-            "kajiki"=>Ok(Airport),
-            "namero"=>Ok(Metalworks),
-            "kinmedai"=>Ok(Museum),
-            "baigai"=>Ok(RomEn),
-            "yunohana"=>Ok(Gorge),
-            "ohyo"=>Ok(Cargo),
-            "chozame"=>Ok(Shipyard),
-            "nampla"=>Ok(Ruins),
-            "mategai"=>Ok(Spillway),
-            "decaline"=>Ok(Underpass),
-            "sumeshi"=>Ok(World),
-            _=>bail!("Invalid Stage"),
-        }
-    }
+
+struct Stage{
+    name:String,
+    image_url:String,
 }
 
 impl Display for Stage{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use Stage::*;
-        f.write_str(
-            match self{
-                BAndD=>"Barnacle & Dime",
-                Depot=>"Bluefin Depot",
-                Springs=>"Brinewater Springs",
-                Capital=>"Crableg Capital",
-                Alley=>"Eeltail Alley",
-                Heights=>"Flounder Heights",
-                GrandArena=>"Grand Splatlands Bowl",
-                Market=>"Hagglefish Market",
-                Bridge=>"Hammerhead Bridge",
-                Track=>"Humpback Pump Track",
-                Academy=>"Inkblot Art Academy",
-                Hub=>"Lemuria Hub",
-                Resort=>"Mahi-Mahi Resort",
-                Mart=>"MakoMart",
-                Manta=>"Manta Maria",
-                Airport=>"Marlin Airport",
-                Metalworks=>"Mincemeat Metalworks",
-                Museum=>"Museum d'Alfonsino",
-                RomEn=>"Robo ROM-en",
-                Gorge=>"Scorch Gorge",
-                Cargo=>"Shipshape Cargo Co.",
-                Shipyard=>"Sturgeon Shipyard",
-                Ruins=>"Um'ami Ruins",
-                Spillway=>"Undertow Spillway",
-                Underpass=>"Urchin Underpass",
-                World=>"Wahoo World",
-            }
-        )
+        f.write_str(&self.name)
     }
 }
 
@@ -355,12 +267,13 @@ struct Battle{
     // uuid:String,
     // lobby:String,
     mode:Mode,
-    stage:String,
+    stage:Stage,
     result:BattleResult,
     our_score:u8,
     their_score:u8,
     our_players:Vec<Player>,
     their_players:Vec<Player>,
+    duration:u16,
     // start_time:u64,
     // end_time:u64,
 }
@@ -368,18 +281,26 @@ impl Battle{
     fn from_map(map:Map<String,Value>)->anyhow::Result<Self>{
         let map=map.get("data").ok_or(anyhow!("failed to get data"))?.get("vsHistoryDetail").ok_or(anyhow!("failed to get vsHistory"))?;
         let mode=match map.get("vsRule"){
-            Some(Value::Object(mode))=>match mode.get("rule"){
-                Some(Value::String(code))=>code.to_lowercase().parse()?,
+            Some(Value::Object(mode))=>match mode.get("name"){
+                Some(Value::String(code))=>code.parse()?,
                 _=>bail!("failed to find mode"),
             },
             _=>bail!("Failed to find mode"),
         };
+        let our_team=map.get("myTeam").ok_or(anyhow!("Couldn't find my team"))?;
+        let their_team=map.get("otherTeams").ok_or(anyhow!("Couldn't find my team"))?.get(0).unwrap();
         Ok(Battle { 
             // uuid: match map.get("uuid"){
             //     Some(Value::String(string))=>string.clone(),
             //     _=>bail!("failed to find uuid"),
             // },
-            stage:String::from(map.get("vsStage").ok_or(anyhow!("Failed to find stage"))?.get("name").ok_or(anyhow!("Failed to get stage name"))?.as_str().ok_or(anyhow!("Stage name is not string"))?),
+            stage:{
+                let vs_stage=map.get("vsStage").ok_or(anyhow!("Failed to find stage"))?;
+                Stage{
+                    name:String::from(vs_stage.get("name").ok_or(anyhow!("Failed to get stage name"))?.as_str().ok_or(anyhow!("Stage name is not string"))?),
+                    image_url:String::from(vs_stage.get("image").ok_or(anyhow!("failed to find stage image"))?.get("url").ok_or(anyhow!("failed to find stage image url"))?.as_str().ok_or(anyhow!("stage image url not string"))?)
+                }
+            },
             // lobby:match map.get("lobby"){
             //     Some(Value::String(string))=>string.clone(),
             //     _=>bail!("Failed to find lobby"),
@@ -388,15 +309,28 @@ impl Battle{
                 Some(Value::String(s))=>s.to_lowercase().parse()?,
                 _=>bail!("Failed to find result"),
             },
-            our_score: map.get("myTeam").ok_or(anyhow!("Couldn't find my team"))?.get("result").ok_or(anyhow!("Couldn't find our result"))?.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().unwrap() as u8,
-            their_score: map.get("otherTeams").ok_or(anyhow!("Couldn't find my team"))?.get(0).unwrap().get("result").ok_or(anyhow!("Couldn't find our result"))?.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().unwrap() as u8,
+            our_score:{
+                let result=our_team.get("result").ok_or(anyhow!("Couldn't find our result"))?;
+                match mode{
+                    Mode::TurfWar=>(result.get("paintRatio").ok_or(anyhow!("counldn't get our paint"))?.as_f64().unwrap()*100.0) as u8,
+                    _=>result.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().unwrap() as u8,
+                } 
+            },
+            their_score: {
+                let result=their_team.get("result").ok_or(anyhow!("Couldn't find our result"))?;
+                match mode{
+                    Mode::TurfWar=>(result.get("paintRatio").ok_or(anyhow!("counldn't get our paint"))?.as_f64().unwrap()*100.0) as u8,
+                    _=>result.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().unwrap() as u8,
+                } 
+            },
             mode: mode,
-            our_players: map.get("myTeam").ok_or(anyhow!("couldn't find our team"))?.get("players").ok_or(anyhow!("couldn't get our players"))?.as_array().unwrap().iter().filter_map(|player|{
+            our_players: our_team.get("players").ok_or(anyhow!("couldn't get our players"))?.as_array().unwrap().iter().filter_map(|player|{
                 Player::from_map(player.as_object()?).ok()
             }).collect(), 
-            their_players:map.get("otherTeams").ok_or(anyhow!("Couldn't find my team"))?.get(0).unwrap().get("players").ok_or(anyhow!("couldn't get their players"))?.as_array().unwrap().iter().filter_map(|player|{
+            their_players:their_team.get("players").ok_or(anyhow!("couldn't get their players"))?.as_array().unwrap().iter().filter_map(|player|{
                 Player::from_map(player.as_object()?).ok()
             }).collect(), 
+            duration:map.get("duration").ok_or(anyhow!("Failed to get duration"))?.as_u64().ok_or(anyhow!("duration is not integer"))? as u16
             // start_time: match map.get("start_time")?{
             //     Value::Number(n)=>n.as_u64()?,
             //     _=>return None,
@@ -409,11 +343,18 @@ impl Battle{
     }
 }
 
+fn format_durr(durr:u16)->String{
+    format!("{}:{:02}",durr/60,durr%60)
+}
 
 impl Display for Battle{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let our_players=self.our_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
         let their_players=self.their_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
-        write!(f,"{0} : {1}\n{6}:  {2}-{3}\n\nOur Players:\n{4}\nTheir Players:\n{5}",self.mode,self.stage,self.our_score,self.their_score,our_players,their_players,self.result)
+        let percentIfTurfWar=match self.mode{
+            Mode::TurfWar=>"%",
+            _=>"",
+        };
+        write!(f,"{0} : {1}\n{6}:  {2}{percentIfTurfWar}-{3}{percentIfTurfWar}\nDuration {7}\n\nOur Players:\n{4}\nTheir Players:\n{5}",self.mode,self.stage,self.our_score,self.their_score,our_players,their_players,self.result,format_durr(self.duration))
     }
 }
