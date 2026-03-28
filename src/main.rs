@@ -7,72 +7,33 @@ use std::str::FromStr;
 use anyhow::{anyhow,bail};
 use std::{sync::mpsc,path::Path,fs::File};
 
-const S3S_RESULTS_DIR:&str="";
+const S3S_RESULTS_DIR:&str="/home/agiller/.config/s3s/exports/results/";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()>{
     //setup notify to check s3s results folder
-    // let (tx,rx)=mpsc::channel::<notify::Result<Event>>();
-    // let mut watcher = notify::recommended_watcher(tx)?;
-    // watcher.watch(Path::new(S3S_RESULTS_DIR), notify::RecursiveMode::NonRecursive)?;
-    // loop{
-    //     // wait for new log
-    //     match rx.recv(){
-    //         Ok(Ok(event))=>if let EventKind::Access(event::AccessKind::Close(_))=event.kind{
-                // let path=event.paths[0].as_path();
-                let path="/home/agiller/.config/s3s/exports/results/20260310T205332Z.json";
+    let (tx,rx)=mpsc::channel::<notify::Result<Event>>();
+    let mut watcher = notify::recommended_watcher(tx)?;
+    watcher.watch(Path::new(S3S_RESULTS_DIR), notify::RecursiveMode::NonRecursive)?;
+    loop{
+        // wait for new log
+        match rx.recv(){
+            Ok(Ok(event))=>if let EventKind::Create(event::CreateKind::File)=event.kind{
+                let path=event.paths[0].as_path();
+                println!("scanning file at {}",path.to_string_lossy());
+                // let path="/home/agiller/.config/s3s/exports/results/20260310T205332Z.json";
                 let file=File::open(path)?;
                 if let Value::Object(battle)=serde_json::from_reader(file)?{
                     let battle=Battle::from_map(battle)?;
                     println!("{}",battle);
+
+                    // post log to discord
                 }
-        //     },
-        //     Ok(Err(e))=>println!("watch error: {:?}", e),
-        //     Err(e)=>bail!(e)
-        // };
-        // check stats.ink battle log
-        // match client.get("https://stat.ink/api/v3/s3s/uuid-list?lobby=private").bearer_auth(API_KEY).send().await{
-        //     Ok(res)=>{
-        //         if let Value::Array(battles)=res.json().await?{
-        //             let battles:Vec<&String>=battles.iter().filter_map(|value|{
-        //                 match value {
-        //                     Value::String(uuid)=>Some(uuid),
-        //                     _=>None,
-        //                 }
-        //             }).collect();
-        //             let mut i=0;
-        //             while i<battles.len() && {
-        //                 match most_recent_battle{
-        //                     Some(uuid)=>battles[i]!=uuid,
-        //                     _=>true
-        //                 }   
-        //             }{
-        //                 // get battle log
-        //                 match client.get(format!("https://stat.ink/api/v3/battle/{}",battles[i])).send().await{
-        //                     Ok(res)=>{
-        //                         if let Value::Object(map)=res.json().await?{
-        //                             let battle=Battle::from_map(map)?;
-        //                             println!("{}",battle);
-        //                         }
-        //                     }
-        //                     Err(err)=>{
-        //                         println!("error: {}",err);
-        //                     }
-        //                 }
-        //             }
-        //             most_recent_battle=Some(battles[0]);
-        //         }
-        //     }
-        //     Err(err)=>{
-        //         println!("error: {}",err);
-        //     }
-        
-        // parse log
-        
-        // post log to discord
-        Ok(())
-    // }
-    // }
+            },
+            Ok(Err(e))=>println!("watch error: {:?}", e),
+            Err(e)=>bail!(e)
+        };
+    };
 }
 
 
@@ -111,15 +72,27 @@ impl Display for Mode{
 }
 
 struct Gear{
+    name:String,
     primary_ability:String,
     secondary_abilities:Vec<Option<String>>,
 }
-
-// struct Gears{
-//     headgear:Gear,
-//     clothing:Gear,
-//     shoes:Gear,
-// }
+impl Gear{
+    fn from_map(map:&Value)->Option<Self>{
+        Some(Gear{
+            name:map.get("name")?.as_str()?.to_string(),
+            primary_ability:map.get("primaryGearPower")?.get("name")?.to_string(),
+            secondary_abilities:map.get("additionalGearPowers")?.as_array()?.iter().map_while(|gear|{
+                match gear.get("name"){
+                    Some(Value::String(name))=>match name.as_str(){
+                        "Unknown"=>Some(None),
+                        name=>Some(Some(String::from(name)))
+                    },
+                    _=>None
+                }
+            }).collect()
+        })
+    }
+}
 
 struct Player{
     me:bool,
@@ -131,7 +104,7 @@ struct Player{
     assists:u8,
     deaths:u8,
     specials:u8,
-    // gears:Vec<Gear>,
+    gears:[Gear;3],
 }
 
 impl Player{
@@ -162,54 +135,26 @@ impl Player{
                 _=>bail!("Failed to get weapon")
             },
             kills:match result.get("kill"){
-                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("too many kills"))? as u8,
+                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("kills not an int"))? as u8,
                 _=>bail!("Failed to get kills"),
             },
             assists:match result.get("assist"){
-                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("too many assists"))? as u8,
+                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("assists not an int"))? as u8,
                 _=>bail!("Failed to get assits"),
             },
             deaths:match result.get("death"){
-                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("too many deaths"))? as u8,
+                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("deaths not an int"))? as u8,
                 _=>bail!("Failed to get deaths"),
             },
             specials:match result.get("special"){
-                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("too many specials"))? as u8,
+                Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("specials not an int"))? as u8,
                 _=>bail!("Failed to get specials"),
             },
-            // gears:match map.get("gears"){
-            //     Some(Value::Object(gears))=>{
-            //         gears.values().map_while(|gear|{
-            //             if let Value::Object(gear)=gear{
-            //                 Some(Gear{
-            //                     primary_ability:
-            //                         match gear.get("primary_ability"){
-            //                             Some(Value::String(ability))=>ability.clone(),
-            //                             _=>{
-            //                                 return None
-            //                             }
-            //                         },
-            //                     secondary_abilities:
-            //                         match gear.get("secondary_abilities"){
-            //                             Some(Value::Array(abilities))=>abilities.iter().map_while(|ability|{
-            //                                 match ability{
-            //                                     Value::String(ability)=>Some(Some(ability.clone())),
-            //                                     Value::Null=>Some(None),
-            //                                     _=>None,
-            //                                 }
-            //                             }).collect(),
-            //                             _=>{
-            //                                 return None
-            //                             }
-            //                         }
-            //                 })
-            //             }else{
-            //                 return None
-            //             }
-            //         }).collect()
-            //     },
-            //     _=>bail!("failed to find gears"),
-            // },
+            gears:[
+                Gear::from_map(map.get("headGear").ok_or(anyhow!("failed to find headgear"))?).ok_or(anyhow!("failed to build headgear"))?,
+                Gear::from_map(map.get("clothingGear").ok_or(anyhow!("failed to find clothing"))?).ok_or(anyhow!("failed to build clothing"))?,
+                Gear::from_map(map.get("shoesGear").ok_or(anyhow!("failed to find shoes"))?).ok_or(anyhow!("failed to build shoes"))?,
+                ],
         })
     }
 }
