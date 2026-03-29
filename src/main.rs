@@ -50,12 +50,18 @@ async fn main() -> anyhow::Result<()>{
 
 
 fn message_from_battle(battle:&Battle)->CreateMessage{
+    let our_players=battle.our_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
+        let their_players=battle.their_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
+        let percent_if_turf_war=match battle.mode{
+            Mode::TurfWar=>"%",
+            _=>"",
+        };
     CreateMessage::default().add_embed(
         CreateEmbed::default()
         .timestamp(&battle.timestamp)
         .image(&battle.stage.image_url)
         .title(format!("{2}: {0} - {1}",battle.mode,&battle.stage.name,&battle.result))
-        .description(format!("{}",battle))
+        .description(format!("{4}:  {0}{percent_if_turf_war}-{1}{percent_if_turf_war}\nDuration {5}\n\nOur Players:\n{2}\nTheir Players:\n{3}",battle.our_score,battle.their_score,our_players,their_players,battle.result,format_durr(battle.duration)))
     )
 }
 
@@ -322,10 +328,10 @@ impl Display for Battle{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let our_players=self.our_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
         let their_players=self.their_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
-        let percentIfTurfWar=match self.mode{
+        let percent_if_turf_war=match self.mode{
             Mode::TurfWar=>"%",
             _=>"",
         };
-        write!(f,"{0} : {1}\n{6}:  {2}{percentIfTurfWar}-{3}{percentIfTurfWar}\nDuration {7}\n\nOur Players:\n{4}\nTheir Players:\n{5}",self.mode,self.stage,self.our_score,self.their_score,our_players,their_players,self.result,format_durr(self.duration))
+        write!(f,"{0} : {1}\n{6}:  {2}{percent_if_turf_war}-{3}{percent_if_turf_war}\nDuration {7}\n\nOur Players:\n{4}\nTheir Players:\n{5}",self.mode,self.stage,self.our_score,self.their_score,our_players,their_players,self.result,format_durr(self.duration))
     }
 }
