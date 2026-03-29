@@ -8,7 +8,7 @@ use anyhow::{anyhow,bail};
 use std::{sync::mpsc,path::Path,fs::File};
 use std::env;
 
-use serenity::{builder::{CreateEmbed, CreateMessage}, model::{Timestamp,id::ChannelId}};
+use serenity::{builder::{CreateEmbed, CreateMessage}, model::{Timestamp,id::ChannelId,colour::Color}};
 use serenity::prelude::*;
 
 const S3S_RESULTS_DIR:&str="/home/agiller/.config/s3s/exports/results/";
@@ -51,17 +51,22 @@ async fn main() -> anyhow::Result<()>{
 
 fn message_from_battle(battle:&Battle)->CreateMessage{
     let our_players=battle.our_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
-        let their_players=battle.their_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
-        let percent_if_turf_war=match battle.mode{
-            Mode::TurfWar=>"%",
-            _=>"",
-        };
+    let their_players=battle.their_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
+    let percent_if_turf_war=match battle.mode{
+        Mode::TurfWar=>"%",
+        _=>"",
+    };
     CreateMessage::default().add_embed(
         CreateEmbed::default()
         .timestamp(&battle.timestamp)
         .image(&battle.stage.image_url)
         .title(format!("{2}: {0} - {1}",battle.mode,&battle.stage.name,&battle.result))
-        .description(format!("{4}:  {0}{percent_if_turf_war}-{1}{percent_if_turf_war}\nDuration {5}\n\nOur Players:\n{2}\nTheir Players:\n{3}",battle.our_score,battle.their_score,our_players,their_players,battle.result,format_durr(battle.duration)))
+        // .fields(
+        //     battle.our_players.iter().map(|player|{(&player.name,format!("K:{:2} A:{:2} D:{:2} S:{:2} {:4}p",player.kills,player.assists,player.deaths,player.specials,player.turf_inked),true)})
+        //     .chain(battle.their_players.iter().map(|player|{(&player.name,format!("K:{:2} A:{:2} D:{:2} S:{:2} {:4}p",player.kills,player.assists,player.deaths,player.specials,player.turf_inked),true)}))
+        // )
+        .description(format!("{4}:  {0}{percent_if_turf_war}-{1}{percent_if_turf_war}\nDuration {5}\n\n```Our Players:\n{2}\nTheir Players:\n{3}```",battle.our_score,battle.their_score,our_players,their_players,battle.result,format_durr(battle.duration)))
+        .color(battle.our_color)
     )
 }
 
@@ -249,6 +254,7 @@ struct Battle{
     our_players:Vec<Player>,
     their_players:Vec<Player>,
     duration:u16,
+    our_color:Color,
     // start_time:u64,
     // end_time:u64,
     timestamp:Timestamp,
@@ -306,15 +312,15 @@ impl Battle{
             their_players:their_team.get("players").ok_or(anyhow!("couldn't get their players"))?.as_array().unwrap().iter().filter_map(|player|{
                 Player::from_map(player.as_object()?).ok()
             }).collect(), 
+            our_color:{
+                let color=our_team.get("color").ok_or(anyhow!("Couldn't get our color"))?;
+                Color::from_rgb(
+                    (color.get("r").ok_or(anyhow!("couldn't find red value"))?.as_f64().ok_or(anyhow!("red is not a float"))? * 256.0) as u8, 
+                    (color.get("g").ok_or(anyhow!("couldn't find green value"))?.as_f64().ok_or(anyhow!("green is not a float"))? * 256.0) as u8, 
+                    (color.get("b").ok_or(anyhow!("couldn't find blue value"))?.as_f64().ok_or(anyhow!("blue is not a float"))? * 256.0) as u8,
+                )
+            },
             duration:map.get("duration").ok_or(anyhow!("Failed to get duration"))?.as_u64().ok_or(anyhow!("duration is not integer"))? as u16,
-            // start_time: match map.get("start_time")?{
-            //     Value::Number(n)=>n.as_u64()?,
-            //     _=>return None,
-            // }, 
-            // end_time: match map.get("end_time")?{
-            //     Value::Number(n)=>n.as_u64()?,
-            //     _=>return None,
-            // }, 
             timestamp:String::from(map.get("playedTime").ok_or(anyhow!("failed to get playedTime"))?.as_str().ok_or(anyhow!("playedTime not string"))?).parse()?,
         })
     }
