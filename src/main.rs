@@ -1,3 +1,4 @@
+use serenity::all::{CreateSelectMenu, CreateSelectMenuOption, Interaction};
 use tokio;
 use notify::{self, Event, EventKind, Watcher, event};
 // use reqwest::{Client,header};
@@ -5,11 +6,14 @@ use serde_json::{Map, Value};
 use std::{fmt::Display};
 use std::str::FromStr;
 use anyhow::{anyhow,bail};
-use std::{sync::mpsc,path::Path,fs::File};
+use std::{sync::{mpsc,Arc},path::Path,fs::File};
 use std::env;
 
-use serenity::{builder::{CreateEmbed, CreateMessage}, model::{Timestamp,id::ChannelId,colour::Color}};
 use serenity::prelude::*;
+use serenity::all::*;
+use serenity::{builder::{CreateEmbed, CreateMessage}, model::{Timestamp,id::ChannelId,colour::Color,application::ComponentInteractionDataKind}};
+
+use serenity::async_trait;
 
 const S3S_RESULTS_DIR:&str="/home/agiller/.config/s3s/exports/results/";
 const SEND_CHANNEL_ID:ChannelId=ChannelId::new(1481734356832882852);
@@ -19,7 +23,10 @@ async fn main() -> anyhow::Result<()>{
     //setup discord
     let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
     let intents=GatewayIntents::GUILD_MESSAGES;
-    let mut client=Client::builder(&token, intents).await?;
+    let mut client=Client::builder(&token, intents).event_handler(Handeler).await?;
+    let http= Arc::clone(&client.http);
+    tokio::task::spawn(async move {let _=client.start().await;});
+    // client.start().await?;
     //setup notify to check s3s results folder
     let (tx,rx)=mpsc::channel::<notify::Result<Event>>();
     let mut watcher = notify::recommended_watcher(tx)?;
@@ -39,7 +46,7 @@ async fn main() -> anyhow::Result<()>{
                     println!("{}",battle);
 
                     // post log to discord
-                    SEND_CHANNEL_ID.send_message(&client.http, message_from_battle(&battle)).await?;
+                    SEND_CHANNEL_ID.send_message(&http, message_from_battle(&battle,String::from(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await?;
                 }
             },
             Ok(Err(e))=>println!("watch error: {:?}", e),
@@ -49,7 +56,7 @@ async fn main() -> anyhow::Result<()>{
 }
 
 
-fn message_from_battle(battle:&Battle)->CreateMessage{
+fn message_from_battle(battle:&Battle,file_name:String)->CreateMessage{
     let our_players=battle.our_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
     let their_players=battle.their_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
     let percent_if_turf_war=match battle.mode{
@@ -62,18 +69,57 @@ fn message_from_battle(battle:&Battle)->CreateMessage{
         .image(&battle.stage.image_url)
         .title(format!("{2}: {0} - {1}",battle.mode,&battle.stage.name,&battle.result))
         // .fields(
-        //     battle.our_players.iter().map(|player|{(&player.name,format!("K:{:2} A:{:2} D:{:2} S:{:2} {:4}p",player.kills,player.assists,player.deaths,player.specials,player.turf_inked),true)})
-        //     .chain(battle.their_players.iter().map(|player|{(&player.name,format!("K:{:2} A:{:2} D:{:2} S:{:2} {:4}p",player.kills,player.assists,player.deaths,player.specials,player.turf_inked),true)}))
-        // )
+            //     battle.our_players.iter().map(|player|{(&player.name,format!("K:{:2} A:{:2} D:{:2} S:{:2} {:4}p",player.kills,player.assists,player.deaths,player.specials,player.turf_inked),true)})
+            //     .chain(battle.their_players.iter().map(|player|{(&player.name,format!("K:{:2} A:{:2} D:{:2} S:{:2} {:4}p",player.kills,player.assists,player.deaths,player.specials,player.turf_inked),true)}))
+            // )
         .description(format!("{4}:  {0}{percent_if_turf_war}-{1}{percent_if_turf_war}\nDuration {5}\n\n```Our Players:\n{2}\nTheir Players:\n{3}```",battle.our_score,battle.their_score,our_players,their_players,battle.result,format_durr(battle.duration)))
         .color(battle.our_color)
     )
+    .select_menu(CreateSelectMenu::new(file_name,serenity::all::CreateSelectMenuKind::String {options:battle.our_players.iter().chain(battle.their_players.iter()).map(|player|{CreateSelectMenuOption::new(&player.name,player.name.clone()+&player.name_id)}).collect()}).placeholder("Select a player for more info"))
 }
-
-enum Mode{
-    TurfWar,
-    TowerControl,
-    SplatZones,
+    struct Handeler;
+    
+    #[async_trait]
+    impl EventHandler for Handeler{
+        async fn interaction_create(&self,ctx:Context,interaction:Interaction){
+            dbg!(&interaction);
+            if let Interaction::Component(interaction)=interaction{
+                let data=&interaction.data;
+                if let ComponentInteractionDataKind::StringSelect{values:data_values}=&data.kind{
+                    if let Ok(file)=File::open(String::from(S3S_RESULTS_DIR)+&data.custom_id){
+                        if let Ok(Value::Object(battle))=serde_json::from_reader(file){
+                            println!("parsing battle");
+                            if let Ok(battle)=Battle::from_map(battle){
+                                println!("parsed battle");
+                                let _=if let Some(player)=battle.our_players.iter().chain(battle.their_players.iter()).find(|player|{player.name.clone()+&player.name_id==data_values[0]}){
+                                    interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new()
+                                        .content(format!("{player} {}\n{}\nPrimary Ability     Primary Ability     Primary Ability\n{}\nSecondary Abilities Secondary Abilities Secondary Abilities\n{}\n{}\n{}",
+                                            player.weapon,
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.name)}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.primary_ability)}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.display_secondary_ability(0))}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.display_secondary_ability(1))}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.display_secondary_ability(2))}),
+                                        ))
+                                    )).await
+                                }else{
+                                    interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content(format!("{} not found",data_values[0])))).await
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        async fn ready(&self, _: Context, ready: serenity::all::Ready) {
+            println!("{} is connected!", ready.user.name);
+        }
+    }
+    
+    enum Mode{
+        TurfWar,
+        TowerControl,
+        SplatZones,
     RainMaker,
     ClamBlitz,
 }
@@ -125,11 +171,19 @@ impl Gear{
             }).collect()
         })
     }
+    fn display_secondary_ability(&self,idx:usize)->&str{
+        match self.secondary_abilities.get(idx){
+            Some(Some(name))=>name,
+            Some(None)=>"???",
+            None=>""
+        }
+    }
 }
 
 struct Player{
     me:bool,
     name:String,
+    name_id:String,
     turf_inked:u16,
     // rank:u8,
     weapon:String,
@@ -148,6 +202,10 @@ impl Player{
         };
         Ok(Player{
             me:if let Some(Value::Bool(me)) = map.get("isMyself") {*me} else {false},
+            name_id:match map.get("nameId").ok_or(anyhow!("Failed to get player id"))?{
+                Value::String(id)=>id.clone(),
+                _=>bail!("player id is not string")
+            },
             name:match map.get("name"){
                 Some(Value::String(n))=>n.clone(),
                 _=>bail!("Failed to get player name"),
@@ -246,6 +304,7 @@ impl Display for BattleResult{
 struct Battle{
     // uuid:String,
     // lobby:String,
+    // file_name:String,
     mode:Mode,
     stage:Stage,
     result:BattleResult,
@@ -272,10 +331,7 @@ impl Battle{
         let our_team=map.get("myTeam").ok_or(anyhow!("Couldn't find my team"))?;
         let their_team=map.get("otherTeams").ok_or(anyhow!("Couldn't find my team"))?.get(0).unwrap();
         Ok(Battle { 
-            // uuid: match map.get("uuid"){
-            //     Some(Value::String(string))=>string.clone(),
-            //     _=>bail!("failed to find uuid"),
-            // },
+            // file_name:file_name.into(),
             stage:{
                 let vs_stage=map.get("vsStage").ok_or(anyhow!("Failed to find stage"))?;
                 Stage{
