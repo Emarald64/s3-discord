@@ -91,9 +91,9 @@ fn message_from_battle(battle:&Battle,file_name:String)->CreateMessage{
                 if let ComponentInteractionDataKind::StringSelect{values:data_values}=&data.kind{
                     if let Ok(file)=File::open(String::from(S3S_RESULTS_DIR)+&data.custom_id){
                         if let Ok(Value::Object(battle))=serde_json::from_reader(file){
-                            println!("parsing battle");
+                            println!("parsing {}",&data.custom_id);
                             if let Ok(battle)=Battle::from_map(battle){
-                                println!("parsed battle");
+                                println!("getting data for {}",data_values[0]);
                                 let _=if let Some(player)=battle.our_players.iter().chain(battle.their_players.iter()).find(|player|{player.name.clone()+&player.name_id==data_values[0]}){
                                     interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new()
                                         .content(format!("```{player}   Weapon:{}\n{}\n\nGear:\n{}\nPrimary Ability     Primary Ability     Primary Ability\n{}\n\nSecondary Abilities Secondary Abilities Secondary Abilities\n{}\n{}\n{}```",
@@ -186,7 +186,7 @@ impl Gear{
 }
 
 struct Player{
-    me:bool,
+    // me:bool,
     name:String,
     name_id:String,
     byname:String,
@@ -207,7 +207,7 @@ impl Player{
             _=>bail!("Failed to get player result"),
         };
         Ok(Player{
-            me:if let Some(Value::Bool(me)) = map.get("isMyself") {*me} else {false},
+            // me:if let Some(Value::Bool(me)) = map.get("isMyself") {*me} else {false},
             name_id:match map.get("nameId").ok_or(anyhow!("Failed to get player id"))?{
                 Value::String(id)=>id.clone(),
                 _=>bail!("player id is not string")
