@@ -41,12 +41,15 @@ async fn main() -> anyhow::Result<()>{
                 let file=File::open(path).expect("invalid file path");
                 if let Value::Object(battle)=serde_json::from_reader(file)?{
                     println!("parsing battle");
-                    let battle=Battle::from_map(battle)?;
-                    println!("parsed battle");
-                    println!("{}",battle);
-
-                    // post log to discord
-                    SEND_CHANNEL_ID.send_message(&http, message_from_battle(&battle,String::from(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await?;
+                    match Battle::from_map(battle){
+                        Ok(battle)=>{
+                            println!("{}",battle);
+        
+                            // post log to discord
+                            SEND_CHANNEL_ID.send_message(&http, message_from_battle(&battle,String::from(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await?;
+                        },
+                        Err(err)=>{println!("{}",err);}
+                    }
                 }
             },
             Ok(Err(e))=>println!("watch error: {:?}", e),
@@ -82,7 +85,7 @@ fn message_from_battle(battle:&Battle,file_name:String)->CreateMessage{
     #[async_trait]
     impl EventHandler for Handeler{
         async fn interaction_create(&self,ctx:Context,interaction:Interaction){
-            dbg!(&interaction);
+            // dbg!(&interaction);
             if let Interaction::Component(interaction)=interaction{
                 let data=&interaction.data;
                 if let ComponentInteractionDataKind::StringSelect{values:data_values}=&data.kind{
@@ -93,14 +96,16 @@ fn message_from_battle(battle:&Battle,file_name:String)->CreateMessage{
                                 println!("parsed battle");
                                 let _=if let Some(player)=battle.our_players.iter().chain(battle.their_players.iter()).find(|player|{player.name.clone()+&player.name_id==data_values[0]}){
                                     interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new()
-                                        .content(format!("{player} {}\n{}\nPrimary Ability     Primary Ability     Primary Ability\n{}\nSecondary Abilities Secondary Abilities Secondary Abilities\n{}\n{}\n{}",
+                                        .content(format!("```{player}   Weapon:{}\n{}\n\nGear:\n{}\nPrimary Ability     Primary Ability     Primary Ability\n{}\n\nSecondary Abilities Secondary Abilities Secondary Abilities\n{}\n{}\n{}```",
                                             player.weapon,
+                                            player.byname,
                                             player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.name)}),
                                             player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.primary_ability)}),
                                             player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.display_secondary_ability(0))}),
                                             player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.display_secondary_ability(1))}),
                                             player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.display_secondary_ability(2))}),
                                         ))
+                                        .ephemeral(true)
                                     )).await
                                 }else{
                                     interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content(format!("{} not found",data_values[0])))).await
@@ -184,6 +189,7 @@ struct Player{
     me:bool,
     name:String,
     name_id:String,
+    byname:String,
     turf_inked:u16,
     // rank:u8,
     weapon:String,
@@ -210,6 +216,7 @@ impl Player{
                 Some(Value::String(n))=>n.clone(),
                 _=>bail!("Failed to get player name"),
             },
+            byname:String::from(map.get("byname").ok_or(anyhow!("Failed to find byname"))?.as_str().ok_or(anyhow!("byname is not string"))?),
             turf_inked:match map.get("paint"){
                 Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("too much paint"))? as u16,
                 _=>bail!("Failed to get player paint"),
