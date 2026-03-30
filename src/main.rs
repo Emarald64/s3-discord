@@ -3,11 +3,12 @@ use tokio;
 use notify::{self, Event, EventKind, Watcher, event};
 // use reqwest::{Client,header};
 use serde_json::{Map, Value};
+use std::time::Duration;
 use std::{fmt::Display};
 use std::str::FromStr;
 use anyhow::{anyhow,bail};
 use std::{sync::{mpsc,Arc},path::Path,fs::File};
-use std::env;
+use std::{env, fs};
 
 use serenity::prelude::*;
 use serenity::all::*;
@@ -36,6 +37,21 @@ async fn main() -> anyhow::Result<()>{
         match rx.recv(){
             Ok(Ok(event))=>if let EventKind::Create(event::CreateKind::File)=event.kind{
                 let path=event.paths[0].as_path();
+                // wait for 1 sec after the file was created
+                let wait=match fs::metadata(path){
+                    Ok(metadata)=>match metadata.created(){
+                        Ok(time)=>match time.elapsed(){
+                            Ok(durr)=>Duration::from_secs(1).checked_sub(durr),
+                            Err(_)=>Some(Duration::from_secs(1))
+                        },
+                        Err(_)=>Some(Duration::from_secs(1))
+                    },
+                    Err(_)=>Some(Duration::from_secs(1)),
+                };
+                // if the file is more than a second old, dont wait
+                if let Some(wait)=wait{
+                    tokio::time::sleep(wait).await;
+                }
                 println!("scanning file at {}",path.to_string_lossy());
                 // let path="/home/agiller/.config/s3s/exports/results/20260310T205332Z.json";
                 let file=File::open(path).expect("invalid file path");
@@ -71,11 +87,7 @@ fn message_from_battle(battle:&Battle,file_name:String)->CreateMessage{
         .timestamp(&battle.timestamp)
         .image(&battle.stage.image_url)
         .title(format!("{2}: {0} - {1}",battle.mode,&battle.stage.name,&battle.result))
-        // .fields(
-            //     battle.our_players.iter().map(|player|{(&player.name,format!("K:{:2} A:{:2} D:{:2} S:{:2} {:4}p",player.kills,player.assists,player.deaths,player.specials,player.turf_inked),true)})
-            //     .chain(battle.their_players.iter().map(|player|{(&player.name,format!("K:{:2} A:{:2} D:{:2} S:{:2} {:4}p",player.kills,player.assists,player.deaths,player.specials,player.turf_inked),true)}))
-            // )
-        .description(format!("{4}:  {0}{percent_if_turf_war}-{1}{percent_if_turf_war}\nDuration {5}\n\n```Our Players:\n{2}\nTheir Players:\n{3}```",battle.our_score,battle.their_score,our_players,their_players,battle.result,format_durr(battle.duration)))
+        .description(format!("{4}:  {0}{percent_if_turf_war}-{1}{percent_if_turf_war}\nDuration {5}\nLobby: {6}\n```Our Players:\n{2}\nTheir Players:\n{3}```",battle.our_score,battle.their_score,our_players,their_players,battle.result,format_durr(battle.duration),battle.lobby.to_lowercase()))
         .color(battle.our_color)
     )
     .select_menu(CreateSelectMenu::new(file_name,serenity::all::CreateSelectMenuKind::String {options:battle.our_players.iter().chain(battle.their_players.iter()).map(|player|{CreateSelectMenuOption::new(&player.name,player.name.clone()+&player.name_id)}).collect()}).placeholder("Select a player for more info"))
@@ -86,24 +98,24 @@ fn message_from_battle(battle:&Battle,file_name:String)->CreateMessage{
     impl EventHandler for Handeler{
         async fn interaction_create(&self,ctx:Context,interaction:Interaction){
             // dbg!(&interaction);
-            if let Interaction::Component(interaction)=interaction{
+            if let Interaction::Component(mut interaction)=interaction{
                 let data=&interaction.data;
                 if let ComponentInteractionDataKind::StringSelect{values:data_values}=&data.kind{
+                    println!("opening {}",&data.custom_id);
                     if let Ok(file)=File::open(String::from(S3S_RESULTS_DIR)+&data.custom_id){
                         if let Ok(Value::Object(battle))=serde_json::from_reader(file){
-                            println!("parsing {}",&data.custom_id);
                             if let Ok(battle)=Battle::from_map(battle){
                                 println!("getting data for {}",data_values[0]);
                                 let _=if let Some(player)=battle.our_players.iter().chain(battle.their_players.iter()).find(|player|{player.name.clone()+&player.name_id==data_values[0]}){
                                     interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new()
-                                        .content(format!("```{player}   Weapon:{}\n{}\n\nGear:\n{}\nPrimary Ability     Primary Ability     Primary Ability\n{}\n\nSecondary Abilities Secondary Abilities Secondary Abilities\n{}\n{}\n{}```",
+                                        .content(format!("```{player}   Weapon:{}\n{}\n\nGear:\n{}\nPrimary Ability          Primary Ability          Primary Ability\n{}\n\nSecondary Abilities      Secondary Abilities      Secondary Abilities\n{}\n{}\n{}```",
                                             player.weapon,
                                             player.byname,
-                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.name)}),
-                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.primary_ability)}),
-                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.display_secondary_ability(0))}),
-                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.display_secondary_ability(1))}),
-                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:20}",gear.display_secondary_ability(2))}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.name)}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.primary_ability)}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(0))}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(1))}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(2))}),
                                         ))
                                         .ephemeral(true)
                                     )).await
@@ -111,6 +123,9 @@ fn message_from_battle(battle:&Battle,file_name:String)->CreateMessage{
                                     interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content(format!("{} not found",data_values[0])))).await
                                 };
                             }
+                        }else{
+                            let _=interaction.create_response(&ctx,CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content("Could not find battle"))).await;
+                            let _=interaction.message.edit(ctx, EditMessage::new().components(vec![]));
                         }
                     }
                 }
@@ -121,10 +136,10 @@ fn message_from_battle(battle:&Battle,file_name:String)->CreateMessage{
         }
     }
     
-    enum Mode{
-        TurfWar,
-        TowerControl,
-        SplatZones,
+enum Mode{
+    TurfWar,
+    TowerControl,
+    SplatZones,
     RainMaker,
     ClamBlitz,
 }
@@ -164,7 +179,7 @@ impl Gear{
     fn from_map(map:&Value)->Option<Self>{
         Some(Gear{
             name:map.get("name")?.as_str()?.to_string(),
-            primary_ability:map.get("primaryGearPower")?.get("name")?.to_string(),
+            primary_ability:String::from(map.get("primaryGearPower")?.get("name")?.as_str()?),
             secondary_abilities:map.get("additionalGearPowers")?.as_array()?.iter().map_while(|gear|{
                 match gear.get("name"){
                     Some(Value::String(name))=>match name.as_str(){
@@ -309,9 +324,7 @@ impl Display for BattleResult{
 }
 
 struct Battle{
-    // uuid:String,
-    // lobby:String,
-    // file_name:String,
+    lobby:String,
     mode:Mode,
     stage:Stage,
     result:BattleResult,
@@ -346,10 +359,7 @@ impl Battle{
                     image_url:String::from(vs_stage.get("image").ok_or(anyhow!("failed to find stage image"))?.get("url").ok_or(anyhow!("failed to find stage image url"))?.as_str().ok_or(anyhow!("stage image url not string"))?)
                 }
             },
-            // lobby:match map.get("lobby"){
-            //     Some(Value::String(string))=>string.clone(),
-            //     _=>bail!("Failed to find lobby"),
-            // },
+            lobby:String::from(map.get("vsMode").ok_or(anyhow!("couldn't find vsMode"))?.get("mode").ok_or(anyhow!("mode not found"))?.as_str().ok_or(anyhow!("lobby is not a string"))?),
             result:match map.get("judgement"){
                 Some(Value::String(s))=>s.to_lowercase().parse()?,
                 _=>bail!("Failed to find result"),
