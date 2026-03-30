@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()>{
         config_file.read_to_string(&mut config_buf)?;
         config=toml::from_str(&config_buf)?;
     }
-    // dbg!(&config);
+    dbg!(&config);
     let results_path=PathBuf::from(config.results_dir);
     let intents=GatewayIntents::GUILD_MESSAGES;
     //setup notify to check s3s results folder
@@ -118,31 +118,35 @@ impl EventHandler for Handeler{
             let data=&interaction.data;
             if let ComponentInteractionDataKind::StringSelect{values:data_values}=&data.kind{
                 println!("opening {}",&data.custom_id);
-                if let Ok(file)=File::open(self.s3s_results_dir.join(&data.custom_id)){
-                    if let Ok(Value::Object(battle))=serde_json::from_reader(file){
-                        if let Ok(battle)=Battle::from_map(battle){
-                            println!("getting data for {}",data_values[0]);
-                            let _=if let Some(player)=battle.our_players.iter().chain(battle.their_players.iter()).find(|player|{player.name.clone()+&player.name_id==data_values[0]}){
-                                interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new()
-                                    .content(format!("```{player}   Weapon:{}\n{}\n\nGear:\n{}\nPrimary Ability          Primary Ability          Primary Ability\n{}\n\nSecondary Abilities      Secondary Abilities      Secondary Abilities\n{}\n{}\n{}```",
-                                        player.weapon,
-                                        player.byname,
-                                        player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.name)}),
-                                        player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.primary_ability)}),
-                                        player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(0))}),
-                                        player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(1))}),
-                                        player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(2))}),
-                                    ))
-                                    .ephemeral(true)
-                                )).await
-                            }else{
-                                interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content(format!("{} not found",data_values[0])))).await
-                            };
+                let path=self.s3s_results_dir.join(&data.custom_id);
+                match File::open(&path){
+                    Ok(file)=>{
+                        if let Ok(Value::Object(battle))=serde_json::from_reader(file){
+                            if let Ok(battle)=Battle::from_map(battle){
+                                println!("getting data for {}",data_values[0]);
+                                let _=if let Some(player)=battle.our_players.iter().chain(battle.their_players.iter()).find(|player|{player.name.clone()+&player.name_id==data_values[0]}){
+                                    interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new()
+                                        .content(format!("```{player}   Weapon:{}\n{}\n\nGear:\n{}\nPrimary Ability          Primary Ability          Primary Ability\n{}\n\nSecondary Abilities      Secondary Abilities      Secondary Abilities\n{}\n{}\n{}```",
+                                            player.weapon,
+                                            player.byname,
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.name)}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.primary_ability)}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(0))}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(1))}),
+                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(2))}),
+                                        ))
+                                        .ephemeral(true)
+                                    )).await
+                                }else{
+                                    interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content(format!("{} not found",data_values[0])))).await
+                                };
+                            }
+                        }else{
+                            let _=interaction.create_response(&ctx,CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content("Could not find battle"))).await;
+                            let _=interaction.message.edit(ctx, EditMessage::new().components(vec![]));
                         }
-                    }else{
-                        let _=interaction.create_response(&ctx,CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content("Could not find battle"))).await;
-                        let _=interaction.message.edit(ctx, EditMessage::new().components(vec![]));
-                    }
+                    },
+                    Err(err)=>println!("Error opening {}: {}",path.to_string_lossy(),err)
                 }
             }
         }
@@ -300,7 +304,7 @@ impl Player{
 
 impl Display for Player{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,"{0:10} K:{1:2} A:{2:2} D:{3:2} S:{4:2} {5:4}p",self.name,self.kills,self.assists,self.deaths,self.specials,self.turf_inked)
+        write!(f,"{0:10} K:{1:2} A:{2:2} D:{3:2} S:{4:2} {5:4}p K/D:{6:.2}",self.name,self.kills,self.assists,self.deaths,self.specials,self.turf_inked,(self.kills as f32)/(self.deaths as f32))
     }
 }
 
