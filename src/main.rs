@@ -1,44 +1,57 @@
 use serenity::all::{CreateSelectMenu, CreateSelectMenuOption, Interaction};
 use tokio;
 use notify::{self, Event, EventKind, Watcher, event};
-// use reqwest::{Client,header};
+use serde::Deserialize;
 use serde_json::{Map, Value};
+use std::io::Read;
+use std::path::PathBuf;
 use std::time::Duration;
 use std::{fmt::Display};
 use std::str::FromStr;
 use anyhow::{anyhow,bail};
-use std::{sync::{mpsc,Arc},path::Path,fs::File};
-use std::{env, fs};
+use std::{sync::{mpsc,Arc},fs::{File,metadata}};
+// use std::{fs};
 
+use toml;
 use serenity::prelude::*;
 use serenity::all::*;
 use serenity::{builder::{CreateEmbed, CreateMessage}, model::{Timestamp,id::ChannelId,colour::Color,application::ComponentInteractionDataKind}};
 
 use serenity::async_trait;
 
-const S3S_RESULTS_DIR:&str="/home/agiller/.config/s3s/exports/results/";
-const SEND_CHANNEL_ID:ChannelId=ChannelId::new(1481734356832882852);
+// const S3S_RESULTS_DIR:&str="/home/agiller/.config/s3s/exports/results/";
+// const SEND_CHANNEL_ID:ChannelId=ChannelId::new(1481734356832882852);
+const CONFIG_PATH:&str="config.toml";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()>{
-    //setup discord
-    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    //read config file
+    let config:Config;
+    {
+        let mut config_buf=String::default();
+        let mut config_file=File::open(CONFIG_PATH)?;
+        config_file.read_to_string(&mut config_buf)?;
+        config=toml::from_str(&config_buf)?;
+    }
+    // dbg!(&config);
+    let results_path=PathBuf::from(config.results_dir);
     let intents=GatewayIntents::GUILD_MESSAGES;
-    let mut client=Client::builder(&token, intents).event_handler(Handeler).await?;
-    let http= Arc::clone(&client.http);
-    tokio::task::spawn(async move {let _=client.start().await;});
-    // client.start().await?;
     //setup notify to check s3s results folder
     let (tx,rx)=mpsc::channel::<notify::Result<Event>>();
     let mut watcher = notify::recommended_watcher(tx)?;
-    watcher.watch(Path::new(S3S_RESULTS_DIR), notify::RecursiveMode::NonRecursive)?;
+    watcher.watch(&results_path, notify::RecursiveMode::NonRecursive)?;
+
+    //setup discord
+    let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{s3s_results_dir:results_path}).await?;
+    let http= Arc::clone(&client.http);
+    tokio::task::spawn(async move {let _=client.start().await;});
     loop{
         // wait for new log
         match rx.recv(){
             Ok(Ok(event))=>if let EventKind::Create(event::CreateKind::File)=event.kind{
                 let path=event.paths[0].as_path();
                 // wait for 1 sec after the file was created
-                let wait=match fs::metadata(path){
+                let wait=match metadata(path){
                     Ok(metadata)=>match metadata.created(){
                         Ok(time)=>match time.elapsed(){
                             Ok(durr)=>Duration::from_secs(1).checked_sub(durr),
@@ -48,21 +61,22 @@ async fn main() -> anyhow::Result<()>{
                     },
                     Err(_)=>Some(Duration::from_secs(1)),
                 };
-                // if the file is more than a second old, dont wait
+                // if the file is more than a second old, don't wait
                 if let Some(wait)=wait{
                     tokio::time::sleep(wait).await;
                 }
                 println!("scanning file at {}",path.to_string_lossy());
-                // let path="/home/agiller/.config/s3s/exports/results/20260310T205332Z.json";
                 let file=File::open(path).expect("invalid file path");
                 if let Value::Object(battle)=serde_json::from_reader(file)?{
                     println!("parsing battle");
                     match Battle::from_map(battle){
                         Ok(battle)=>{
-                            println!("{}",battle);
-        
-                            // post log to discord
-                            SEND_CHANNEL_ID.send_message(&http, message_from_battle(&battle,String::from(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await?;
+                            if !config.excluded_modes.contains(&battle.mode) || !config.excluded_lobbies.contains(&battle.lobby){
+                                println!("{}",battle);
+            
+                                // post log to discord
+                                ChannelId::new(config.updates_channel_id).send_message(&http, message_from_battle(&battle,String::from(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await?;
+                            }
                         },
                         Err(err)=>{println!("{}",err);}
                     }
@@ -92,50 +106,62 @@ fn message_from_battle(battle:&Battle,file_name:String)->CreateMessage{
     )
     .select_menu(CreateSelectMenu::new(file_name,serenity::all::CreateSelectMenuKind::String {options:battle.our_players.iter().chain(battle.their_players.iter()).map(|player|{CreateSelectMenuOption::new(&player.name,player.name.clone()+&player.name_id)}).collect()}).placeholder("Select a player for more info"))
 }
-    struct Handeler;
-    
-    #[async_trait]
-    impl EventHandler for Handeler{
-        async fn interaction_create(&self,ctx:Context,interaction:Interaction){
-            // dbg!(&interaction);
-            if let Interaction::Component(mut interaction)=interaction{
-                let data=&interaction.data;
-                if let ComponentInteractionDataKind::StringSelect{values:data_values}=&data.kind{
-                    println!("opening {}",&data.custom_id);
-                    if let Ok(file)=File::open(String::from(S3S_RESULTS_DIR)+&data.custom_id){
-                        if let Ok(Value::Object(battle))=serde_json::from_reader(file){
-                            if let Ok(battle)=Battle::from_map(battle){
-                                println!("getting data for {}",data_values[0]);
-                                let _=if let Some(player)=battle.our_players.iter().chain(battle.their_players.iter()).find(|player|{player.name.clone()+&player.name_id==data_values[0]}){
-                                    interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new()
-                                        .content(format!("```{player}   Weapon:{}\n{}\n\nGear:\n{}\nPrimary Ability          Primary Ability          Primary Ability\n{}\n\nSecondary Abilities      Secondary Abilities      Secondary Abilities\n{}\n{}\n{}```",
-                                            player.weapon,
-                                            player.byname,
-                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.name)}),
-                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.primary_ability)}),
-                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(0))}),
-                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(1))}),
-                                            player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(2))}),
-                                        ))
-                                        .ephemeral(true)
-                                    )).await
-                                }else{
-                                    interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content(format!("{} not found",data_values[0])))).await
-                                };
-                            }
-                        }else{
-                            let _=interaction.create_response(&ctx,CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content("Could not find battle"))).await;
-                            let _=interaction.message.edit(ctx, EditMessage::new().components(vec![]));
+struct Handeler{
+    s3s_results_dir:PathBuf
+}
+
+#[async_trait]
+impl EventHandler for Handeler{
+    async fn interaction_create(&self,ctx:Context,interaction:Interaction){
+        // dbg!(&interaction);
+        if let Interaction::Component(mut interaction)=interaction{
+            let data=&interaction.data;
+            if let ComponentInteractionDataKind::StringSelect{values:data_values}=&data.kind{
+                println!("opening {}",&data.custom_id);
+                if let Ok(file)=File::open(self.s3s_results_dir.join(&data.custom_id)){
+                    if let Ok(Value::Object(battle))=serde_json::from_reader(file){
+                        if let Ok(battle)=Battle::from_map(battle){
+                            println!("getting data for {}",data_values[0]);
+                            let _=if let Some(player)=battle.our_players.iter().chain(battle.their_players.iter()).find(|player|{player.name.clone()+&player.name_id==data_values[0]}){
+                                interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new()
+                                    .content(format!("```{player}   Weapon:{}\n{}\n\nGear:\n{}\nPrimary Ability          Primary Ability          Primary Ability\n{}\n\nSecondary Abilities      Secondary Abilities      Secondary Abilities\n{}\n{}\n{}```",
+                                        player.weapon,
+                                        player.byname,
+                                        player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.name)}),
+                                        player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.primary_ability)}),
+                                        player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(0))}),
+                                        player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(1))}),
+                                        player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.display_secondary_ability(2))}),
+                                    ))
+                                    .ephemeral(true)
+                                )).await
+                            }else{
+                                interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content(format!("{} not found",data_values[0])))).await
+                            };
                         }
+                    }else{
+                        let _=interaction.create_response(&ctx,CreateInteractionResponse::Message(CreateInteractionResponseMessage::new().content("Could not find battle"))).await;
+                        let _=interaction.message.edit(ctx, EditMessage::new().components(vec![]));
                     }
                 }
             }
         }
-        async fn ready(&self, _: Context, ready: serenity::all::Ready) {
-            println!("{} is connected!", ready.user.name);
-        }
     }
+    async fn ready(&self, _: Context, ready: serenity::all::Ready) {
+        println!("{} is connected!", ready.user.name);
+    }
+}
     
+#[derive(Deserialize,Debug)]
+struct Config{
+    excluded_modes:Vec<Mode>,
+    excluded_lobbies:Vec<String>,
+    results_dir:String,
+    discord_token:String,
+    updates_channel_id:u64
+}
+
+#[derive(Deserialize,PartialEq, Eq,Debug)]
 enum Mode{
     TurfWar,
     TowerControl,
@@ -277,7 +303,6 @@ impl Display for Player{
         write!(f,"{0:10} K:{1:2} A:{2:2} D:{3:2} S:{4:2} {5:4}p",self.name,self.kills,self.assists,self.deaths,self.specials,self.turf_inked)
     }
 }
-
 
 struct Stage{
     name:String,
