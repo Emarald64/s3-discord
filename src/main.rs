@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()>{
     let config:Config;
     {
         let mut config_buf=String::default();
-        let mut config_file=File::open(CONFIG_PATH)?;
+        let mut config_file=File::open(CONFIG_PATH).expect("config.toml missing");
         config_file.read_to_string(&mut config_buf)?;
         config=toml::from_str(&config_buf)?;
     }
