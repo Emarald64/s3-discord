@@ -1,0 +1,7 @@
+{
+    "excluded_modes" : [],
+    "excluded_lobbies" : [],
+    "results_dir" : "/path/to/s3s/exports/results/",
+    "discord_token" : "",
+    "updates_channel_id" : 0
+}

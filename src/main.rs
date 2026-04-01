@@ -3,7 +3,7 @@ use tokio;
 use notify::{self, Event, EventKind, Watcher, event};
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use std::io::Read;
+// use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::{fmt::Display};
@@ -12,7 +12,7 @@ use anyhow::{anyhow,bail};
 use std::{sync::{mpsc,Arc},fs::{File,metadata}};
 // use std::{fs};
 
-use toml;
+// use toml;
 use serenity::prelude::*;
 use serenity::all::*;
 use serenity::{builder::{CreateEmbed, CreateMessage}, model::{Timestamp,id::ChannelId,colour::Color,application::ComponentInteractionDataKind}};
@@ -21,17 +21,17 @@ use serenity::async_trait;
 
 // const S3S_RESULTS_DIR:&str="/home/agiller/.config/s3s/exports/results/";
 // const SEND_CHANNEL_ID:ChannelId=ChannelId::new(1481734356832882852);
-const CONFIG_PATH:&str="config.toml";
+const CONFIG_PATH:&str="config.json";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()>{
     //read config file
     let config:Config;
     {
-        let mut config_buf=String::default();
-        let mut config_file=File::open(CONFIG_PATH).expect("config.toml missing");
-        config_file.read_to_string(&mut config_buf)?;
-        config=toml::from_str(&config_buf)?;
+        // let mut config_buf=String::default();
+        let config_file=File::open(CONFIG_PATH).expect("config.json missing");
+        // config_file.read_to_string(&mut config_buf)?;
+        config=serde_json::from_reader(&config_file)?;
     }
     dbg!(&config);
     let results_path=PathBuf::from(config.results_dir);

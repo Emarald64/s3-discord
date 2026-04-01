@@ -1,5 +1,0 @@
-excluded_modes = []
-excluded_lobbies = []
-results_dir = "/home/USER/.config/s3s/exports/results/"
-discord_token = ""
-updates_channel_id = 0
