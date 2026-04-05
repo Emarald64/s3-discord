@@ -22,6 +22,6 @@ In the s3s folder create an export folder and a results folder inside of that. C
 
 Create a Discord bot (I don't remember how, look it up) and put the bot's token in discord_token in the config.json
 
-Invite the bot to a server (look it up). Turn on developer mode in discord settings->Advanced. Copy the channel id that you want the bot to send the messages to and put in updates_channel_id in config.json
+Invite the bot to a server (look it up). Turn on developer mode in discord settings->Advanced. Copy the channel id that you want the bot to send the messages to and put it between the square brackets in updates_channel_id in config.json
 
 Run the bot with `cargo run -r` then, in another terminal tab, export battles by running `python s3s.py -o` (It takes a couple minutes for s3s to export battles)

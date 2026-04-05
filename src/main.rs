@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()>{
         // config_file.read_to_string(&mut config_buf)?;
         config=serde_json::from_reader(&config_file)?;
     }
-    dbg!(&config);
+    // dbg!(&config);
     let results_path=PathBuf::from(config.results_dir);
     let intents=GatewayIntents::GUILD_MESSAGES;
     //setup notify to check s3s results folder
@@ -75,7 +75,9 @@ async fn main() -> anyhow::Result<()>{
                                 println!("{}",battle);
             
                                 // post log to discord
-                                ChannelId::new(config.updates_channel_id).send_message(&http, message_from_battle(&battle,String::from(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await?;
+                                for channel_id in &config.updates_channel_id{
+                                    ChannelId::new(*channel_id).send_message(&http, message_from_battle(&battle,String::from(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await?;
+                                }
                             }
                         },
                         Err(err)=>{println!("{}",err);}
@@ -162,7 +164,7 @@ struct Config{
     excluded_lobbies:Vec<String>,
     results_dir:String,
     discord_token:String,
-    updates_channel_id:u64
+    updates_channel_id:Vec<u64>
 }
 
 #[derive(Deserialize,PartialEq, Eq,Debug)]
