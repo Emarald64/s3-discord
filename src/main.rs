@@ -318,19 +318,19 @@ impl Player{
             },
             kills:match result.get("kill"){
                 Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("kills not an int"))? as u8,
-                _=>bail!("Failed to get kills"),
+                _=>0,
             },
             assists:match result.get("assist"){
                 Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("assists not an int"))? as u8,
-                _=>bail!("Failed to get assits"),
+                _=>0,
             },
             deaths:match result.get("death"){
                 Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("deaths not an int"))? as u8,
-                _=>bail!("Failed to get deaths"),
+                _=>0,
             },
             specials:match result.get("special"){
                 Some(Value::Number(n))=>n.as_u64().ok_or(anyhow!("specials not an int"))? as u8,
-                _=>bail!("Failed to get specials"),
+                _=>0,
             },
             gears:[
                 Gear::from_map(map.get("headGear").ok_or(anyhow!("failed to find headgear"))?).ok_or(anyhow!("failed to build headgear"))?,
