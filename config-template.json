@@ -3,5 +3,6 @@
     "excluded_lobbies" : [],
     "results_dir" : "/path/to/s3s/exports/results/",
     "discord_token" : "",
-    "updates_channel_id" : []
+    "updates_channel_ids" : [],
+    "recive_messages" : false
 }

@@ -35,14 +35,14 @@ async fn main() -> anyhow::Result<()>{
     }
     // dbg!(&config);
     let results_path=PathBuf::from(config.results_dir);
-    let intents=GatewayIntents::GUILD_MESSAGES;
+    let intents=if config.recive_messages{ GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT} else {GatewayIntents::GUILD_MESSAGES};
     //setup notify to check s3s results folder
     let (tx,rx)=mpsc::channel::<notify::Result<Event>>();
     let mut watcher = notify::recommended_watcher(tx)?;
     watcher.watch(&results_path, notify::RecursiveMode::NonRecursive)?;
 
     //setup discord
-    let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{s3s_results_dir:results_path}).await?;
+    let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{results_path:results_path,update_channels:config.updates_channel_ids.clone()}).await?;
     let http= Arc::clone(&client.http);
     tokio::task::spawn(async move {let _=client.start().await;});
     loop{
@@ -75,8 +75,8 @@ async fn main() -> anyhow::Result<()>{
                                 println!("{}",battle);
             
                                 // post log to discord
-                                for channel_id in &config.updates_channel_id{
-                                    ChannelId::new(*channel_id).send_message(&http, message_from_battle(&battle,String::from(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await?;
+                                for channel_id in &config.updates_channel_ids{
+                                    channel_id.send_message(&http, message_from_battle(&battle,Some(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await?;
                                 }
                             }
                         },
@@ -91,25 +91,29 @@ async fn main() -> anyhow::Result<()>{
 }
 
 
-fn message_from_battle(battle:&Battle,file_name:String)->CreateMessage{
+fn message_from_battle(battle:&Battle,file_name:Option<&str>)->CreateMessage{
     let our_players=battle.our_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
     let their_players=battle.their_players.iter().fold(String::from(""),|acc,player|{format!("{0}{1}\n",acc,player)});
     let percent_if_turf_war=match battle.mode{
         Mode::TurfWar=>"%",
         _=>"",
     };
-    CreateMessage::default().add_embed(
+    let out=CreateMessage::default().add_embed(
         CreateEmbed::default()
         .timestamp(&battle.timestamp)
         .image(&battle.stage.image_url)
         .title(format!("{2}: {0} - {1}",battle.mode,&battle.stage.name,&battle.result))
         .description(format!("{4}:  {0}{percent_if_turf_war}-{1}{percent_if_turf_war}\nDuration {5}\nLobby: {6}\n```Our Players:\n{2}\nTheir Players:\n{3}```",battle.our_score,battle.their_score,our_players,their_players,battle.result,format_durr(battle.duration),battle.lobby.to_lowercase()))
         .color(battle.our_color)
-    )
-    .select_menu(CreateSelectMenu::new(file_name,serenity::all::CreateSelectMenuKind::String {options:battle.our_players.iter().chain(battle.their_players.iter()).map(|player|{CreateSelectMenuOption::new(&player.name,player.name.clone()+&player.name_id)}).collect()}).placeholder("Select a player for more info"))
+    );
+    match file_name{
+        Some(file_name)=>{out.select_menu(CreateSelectMenu::new(file_name,serenity::all::CreateSelectMenuKind::String {options:battle.our_players.iter().chain(battle.their_players.iter()).map(|player|{CreateSelectMenuOption::new(&player.name,player.name.clone()+&player.name_id)}).collect()}).placeholder("Select a player for more info"))},
+        None=>out
+    }
 }
 struct Handeler{
-    s3s_results_dir:PathBuf
+    results_path:PathBuf,
+    update_channels:Vec<ChannelId>
 }
 
 #[async_trait]
@@ -120,7 +124,7 @@ impl EventHandler for Handeler{
             let data=&interaction.data;
             if let ComponentInteractionDataKind::StringSelect{values:data_values}=&data.kind{
                 println!("opening {}",&data.custom_id);
-                let path=self.s3s_results_dir.join(&data.custom_id);
+                let path=self.results_path.join(&data.custom_id);
                 match File::open(&path){
                     Ok(file)=>{
                         if let Ok(Value::Object(battle))=serde_json::from_reader(file){
@@ -153,6 +157,38 @@ impl EventHandler for Handeler{
             }
         }
     }
+
+    async fn message(&self,ctx:Context,new_message:Message){
+        if self.update_channels.contains(&new_message.channel_id) && new_message.attachments.len()>0{
+            // println!("message in correct channel");
+            let typing=serenity::http::Typing::start(ctx.http.clone(), new_message.channel_id);
+            for attachment in new_message.attachments{
+                let ctx_clone=(&ctx).clone();
+                tokio::spawn(async move {
+                    let channel_id=new_message.channel_id;
+                    let _=if attachment.filename.ends_with(".json") && attachment.size<=500_000{
+                        if let Ok(content)=attachment.download().await{
+                            if let Ok(battle_map) = serde_json::from_slice(content.as_slice()) {
+                                match Battle::from_map(battle_map){
+                                    Ok(battle)=>{channel_id.send_message(&ctx_clone, message_from_battle(&battle,None)).await},
+                                    Err(err)=>{channel_id.say(&ctx_clone, format!("failed to parse attchment: {} due to error: {}",attachment.filename,err)).await}
+                                }
+                            }
+                            else{
+                                channel_id.say(&ctx_clone, format!("failed to parse attachment: {}",attachment.filename)).await
+                            }
+                        }else{
+                            channel_id.say(&ctx_clone, format!("failed to download attachment: {}",attachment.filename)).await
+                        }
+                    }else{
+                        channel_id.say(&ctx_clone, format!("attachment: {} is too large or has wrong extention",attachment.filename)).await
+                    };
+                });
+            }
+            typing.stop();
+        }
+    }
+
     async fn ready(&self, _: Context, ready: serenity::all::Ready) {
         println!("{} is connected!", ready.user.name);
     }
@@ -164,7 +200,8 @@ struct Config{
     excluded_lobbies:Vec<String>,
     results_dir:String,
     discord_token:String,
-    updates_channel_id:Vec<u64>
+    updates_channel_ids:Vec<ChannelId>,
+    recive_messages:bool
 }
 
 #[derive(Deserialize,PartialEq, Eq,Debug)]
@@ -380,7 +417,7 @@ impl Battle{
             _=>bail!("Failed to find mode"),
         };
         let our_team=map.get("myTeam").ok_or(anyhow!("Couldn't find my team"))?;
-        let their_team=map.get("otherTeams").ok_or(anyhow!("Couldn't find my team"))?.get(0).unwrap();
+        let their_team=map.get("otherTeams").ok_or(anyhow!("Couldn't find other teams"))?.get(0).ok_or(anyhow!("couldn't find other team"))?;
         Ok(Battle { 
             // file_name:file_name.into(),
             stage:{
@@ -398,22 +435,22 @@ impl Battle{
             our_score:{
                 let result=our_team.get("result").ok_or(anyhow!("Couldn't find our result"))?;
                 match mode{
-                    Mode::TurfWar=>result.get("paintRatio").map_or(0,|paint|{(paint.as_f64().unwrap()*100.0) as u8}),
-                    _=>result.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().unwrap() as u8,
+                    Mode::TurfWar=>(result.get("paintRatio").ok_or(anyhow!("Couldn't find our paint"))?.as_f64().ok_or(anyhow!("our paint is not a float???"))?*100.0) as u8,
+                    _=>result.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().ok_or(anyhow!("our paint is not a int"))? as u8,
                 } 
             },
             their_score: {
                 let result=their_team.get("result").ok_or(anyhow!("Couldn't find our result"))?;
                 match mode{
-                    Mode::TurfWar=>result.get("paintRatio").map_or(0,|paint|{(paint.as_f64().unwrap()*100.0) as u8}),
-                    _=>result.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().unwrap() as u8,
+                    Mode::TurfWar=>(result.get("paintRatio").ok_or(anyhow!("couldn't find their paint"))?.as_f64().ok_or(anyhow!("their paint is not a float???"))?*100.0) as u8,
+                    _=>result.get("score").ok_or(anyhow!("counldn't get their score"))?.as_u64().ok_or(anyhow!("their paint is not a int"))? as u8,
                 } 
             },
             mode: mode,
-            our_players: our_team.get("players").ok_or(anyhow!("couldn't get our players"))?.as_array().unwrap().iter().filter_map(|player|{
+            our_players: our_team.get("players").ok_or(anyhow!("couldn't get our players"))?.as_array().ok_or(anyhow!("our players not an array"))?.iter().filter_map(|player|{
                 Player::from_map(player.as_object()?).ok()
             }).collect(), 
-            their_players:their_team.get("players").ok_or(anyhow!("couldn't get their players"))?.as_array().unwrap().iter().filter_map(|player|{
+            their_players:their_team.get("players").ok_or(anyhow!("couldn't get their players"))?.as_array().ok_or(anyhow!("their players not an array"))?.iter().filter_map(|player|{
                 Player::from_map(player.as_object()?).ok()
             }).collect(), 
             our_color:{
