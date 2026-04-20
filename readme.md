@@ -7,11 +7,11 @@ A discord bot that uses [s3s](https://github.com/frozenpandaman/s3s) to post you
 - Map, mode, result, and the score for each team
 - Kills, assists, deaths, specials, and points for all players
 - More detailed player info through a selection menu on the message
-- Upload your 
+- Upload battle results and have them formatted
 
 ## Demo
 
-Join [my server](https://discord.gg/GNGR5GQz) and send one of the files in the [demo files](demo-files)
+Join [my server](https://discord.gg/GNGR5GQz) and send one of the [demo files](demo-files) in #general
 
 Or
 
