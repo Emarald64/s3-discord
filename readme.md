@@ -7,6 +7,15 @@ A discord bot that uses [s3s](https://github.com/frozenpandaman/s3s) to post you
 - Map, mode, result, and the score for each team
 - Kills, assists, deaths, specials, and points for all players
 - More detailed player info through a selection menu on the message
+- Upload your 
+
+## Demo
+
+Join [my server](https://discord.gg/GNGR5GQz) and send one of the files in the [demo files](demo-files)
+
+Or
+
+Watch the [Demo Video](https://youtu.be/y-eNDS-uO9g)
 
 ## How to run it yourself
 
@@ -25,6 +34,8 @@ Create a Discord bot (I don't remember how, look it up) and put the bot's token 
 Invite the bot to a server (look it up). Turn on developer mode in discord settings->Advanced. Copy the channel id that you want the bot to send the messages to and put it between the square brackets in updates_channel_id in config.json
 
 Run the bot with `cargo run -r` then, in another terminal tab, export battles by running `python s3s.py -o` (It takes a couple minutes for s3s to export battles)
+
+s3s needs to be reran every time you want to upload new battles and nxapi needs to be reran about once a day to get new tokens for s3s
 
 ## Notes
 
