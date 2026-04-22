@@ -4,5 +4,6 @@
     "results_dir" : "/path/to/s3s/exports/results/",
     "discord_token" : "",
     "updates_channel_ids" : [],
-    "recive_messages" : false
+    "recive_messages" : false,
+    "tracked_players" : []
 }
