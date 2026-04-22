@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
+use std::{fmt::Display};
 use std::str::FromStr;
 use serde_json::{Value,Map};
 use anyhow::{anyhow,bail};
@@ -83,10 +83,11 @@ pub struct Player{
     pub deaths:u8,
     pub specials:u8,
     pub gears:[Gear;3],
+    pub battle_result:Option<BattleResult>,
 }
 
 impl Player{
-    fn from_map(map:&Map<String,Value>)->anyhow::Result<Self>{
+    fn from_map(map:&Map<String,Value>, battle_result:Option<BattleResult>)->anyhow::Result<Self>{
         let result=match map.get("result"){
             Some(Value::Object(map))=>map,
             _=>bail!("Failed to get player result"),
@@ -138,6 +139,8 @@ impl Player{
                 Gear::from_map(map.get("clothingGear").ok_or(anyhow!("failed to find clothing"))?).ok_or(anyhow!("failed to build clothing"))?,
                 Gear::from_map(map.get("shoesGear").ok_or(anyhow!("failed to find shoes"))?).ok_or(anyhow!("failed to build shoes"))?,
                 ],
+
+            battle_result:battle_result,
         })
     }
 }
@@ -159,6 +162,7 @@ impl Display for Stage{
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum BattleResult{
     Win,
     Lose,
@@ -192,6 +196,7 @@ impl Display for BattleResult{
     }
 }
 
+
 pub struct Battle{
     pub lobby:String,
     pub mode:Mode,
@@ -217,6 +222,10 @@ impl Battle{
             },
             _=>bail!("Failed to find mode"),
         };
+        let result: BattleResult=match map.get("judgement"){
+            Some(Value::String(s))=>s.to_lowercase().parse()?,
+            _=>bail!("Failed to find result"),
+        };
         let our_team=map.get("myTeam").ok_or(anyhow!("Couldn't find my team"))?;
         let their_team=map.get("otherTeams").ok_or(anyhow!("Couldn't find other teams"))?.get(0).ok_or(anyhow!("couldn't find other team"))?;
         Ok(Battle { 
@@ -229,10 +238,7 @@ impl Battle{
                 }
             },
             lobby:String::from(map.get("vsMode").ok_or(anyhow!("couldn't find vsMode"))?.get("mode").ok_or(anyhow!("mode not found"))?.as_str().ok_or(anyhow!("lobby is not a string"))?),
-            result:match map.get("judgement"){
-                Some(Value::String(s))=>s.to_lowercase().parse()?,
-                _=>bail!("Failed to find result"),
-            },
+            result:result,
             our_score:{
                 let result=our_team.get("result").ok_or(anyhow!("Couldn't find our result"))?;
                 match mode{
@@ -249,10 +255,10 @@ impl Battle{
             },
             mode: mode,
             our_players: our_team.get("players").ok_or(anyhow!("couldn't get our players"))?.as_array().ok_or(anyhow!("our players not an array"))?.iter().filter_map(|player|{
-                Player::from_map(player.as_object()?).ok()
+                Player::from_map(player.as_object()?,Some(result)).ok()
             }).collect(), 
             their_players:their_team.get("players").ok_or(anyhow!("couldn't get their players"))?.as_array().ok_or(anyhow!("their players not an array"))?.iter().filter_map(|player|{
-                Player::from_map(player.as_object()?).ok()
+                Player::from_map(player.as_object()?,None).ok()
             }).collect(), 
             our_color:{
                 let color=our_team.get("color").ok_or(anyhow!("Couldn't get our color"))?;

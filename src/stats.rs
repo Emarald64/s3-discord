@@ -78,34 +78,37 @@ impl TotalPlayerStats{
     }
 }
 
-#[derive(Deserialize,Serialize,Debug)]
+#[derive(Deserialize,Serialize,Debug,Default)]
 struct StatBreakdown{
     games:u32,
+    wins:u32,
+    losses:u32,
     kills:u32,
+    assists:u32,
     deaths:u32,
     specials:u32,
     points:u32,
 }
 
-impl Default for StatBreakdown {
-    fn default() -> Self {
-        StatBreakdown { games: 0, kills: 0, deaths: 0, specials: 0, points: 0}
-    }
-}
-
 impl AddAssign<&Player> for StatBreakdown{
-    fn add_assign(&mut self, rhs: &Player) {
+    fn add_assign(&mut self, player: &Player) {
+        match player.battle_result{
+            Some(BattleResult::Win)=>{self.wins+=1;},
+            Some(BattleResult::Lose)=>{self.losses+=1},
+            _=>()
+        }
         self.games+=1;
-        self.kills+=rhs.kills as u32;
-        self.deaths+=rhs.deaths as u32;
-        self.specials+=rhs.specials as u32;
-        self.points+=rhs.turf_inked as u32;
+        self.kills+=player.kills as u32;
+        self.assists+=player.assists as u32;
+        self.deaths+=player.deaths as u32;
+        self.specials+=player.specials as u32;
+        self.points+=player.turf_inked as u32;
     }
 }
 
 impl From<&Player> for StatBreakdown{
-    fn from(value: &Player) -> Self {
-        Self { games: 1, kills: value.kills as u32, deaths: value.deaths as u32, specials: value.specials as u32, points: value.turf_inked as u32}
+    fn from(player: &Player) -> Self {
+        Self { games: 1, wins: (player.battle_result==Some(BattleResult::Win)) as u32, losses:(player.battle_result==Some(BattleResult::Lose)) as u32, kills: player.kills as u32, assists: player.assists as u32, deaths: player.deaths as u32, specials: player.specials as u32, points: player.turf_inked as u32}
     }
 }
 
