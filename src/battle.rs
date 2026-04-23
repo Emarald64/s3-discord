@@ -30,13 +30,13 @@ impl FromStr for Mode{
 
 impl Display for Mode{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self{
-            Self::TurfWar=>f.write_str("Turf War"),
-            Self::SplatZones=>f.write_str("Splat Zones"),
-            Self::RainMaker=>f.write_str("Rainmaker"),
-            Self::TowerControl=>f.write_str("Tower Conrol"),
-            Self::ClamBlitz=>f.write_str("Clam Blitz"),
-        }
+        f.write_str(match self{
+            Self::TurfWar=>"Turf War",
+            Self::SplatZones=>"Splat Zones",
+            Self::RainMaker=>"Rainmaker",
+            Self::TowerControl=>"Tower Conrol",
+            Self::ClamBlitz=>"Clam Blitz",
+        })
     }
 }
 

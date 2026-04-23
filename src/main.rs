@@ -19,8 +19,8 @@ use serenity::{model::{id::ChannelId,application::ComponentInteractionDataKind}}
 
 use serenity::async_trait;
 
-pub mod battle;
-pub mod stats;
+mod battle;
+mod stats;
 
 // const S3S_RESULTS_DIR:&str="/home/agiller/.config/s3s/exports/results/";
 // const SEND_CHANNEL_ID:ChannelId=ChannelId::new(1481734356832882852);
@@ -37,9 +37,10 @@ async fn main() -> anyhow::Result<()>{
         config=serde_json::from_reader(&config_file)?;
     }
     // dbg!(&config);
-    println!("scanning all games");
-    let _ =dbg!(AllStats::from_past_games(&config.results_dir, config.tracked_players.clone()).await);
-    return Ok(());
+    // println!("scanning all games");
+    // let stats=AllStats::from_past_games(&config.results_dir, config.tracked_players.clone()).await?;
+    let stats=get_tracked_stats()?;
+    let _ =println!("{}",stats.to_string(None));
     let results_path=PathBuf::from(config.results_dir);
 
     let intents=if config.recive_messages{ GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT} else {GatewayIntents::GUILD_MESSAGES};
@@ -49,10 +50,10 @@ async fn main() -> anyhow::Result<()>{
     watcher.watch(&results_path, notify::RecursiveMode::NonRecursive)?;
 
     //read saved stats
-    let mut stats=get_tracked_stats()?;
+    let mut stats=Arc::new(get_tracked_stats()?);
 
     //setup discord
-    let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{results_path:results_path,update_channels:config.updates_channel_ids.clone()}).await?;
+    let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{results_path:results_path,update_channels:config.updates_channel_ids.clone(), stats:stats}).await?;
     let http= Arc::clone(&client.http);
     tokio::task::spawn(async move {let _=client.start().await;});
     loop{
@@ -84,7 +85,11 @@ async fn main() -> anyhow::Result<()>{
                             if !config.excluded_modes.contains(&battle.mode) || !config.excluded_lobbies.contains(&battle.lobby){
                                 println!("{}",&battle);
                                 
+                                for player in &battle.our_players{
+                                    if config.tracked_players.contains(&player.name){
 
+                                    }
+                                }
                                 // post log to discord
                                 for channel_id in &config.updates_channel_ids{
                                     let _=channel_id.send_message(&http, battle.to_message(Some(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await;
@@ -104,7 +109,8 @@ async fn main() -> anyhow::Result<()>{
 
 struct Handeler{
     results_path:PathBuf,
-    update_channels:Vec<ChannelId>
+    update_channels:Vec<ChannelId>,
+    stats:Arc<AllStats>,
 }
 
 #[async_trait]
@@ -150,33 +156,42 @@ impl EventHandler for Handeler{
     }
 
     async fn message(&self,ctx:Context,new_message:Message){
-        if self.update_channels.contains(&new_message.channel_id) && new_message.attachments.len()>0{
-            // println!("message in correct channel");
-            let typing=serenity::http::Typing::start(ctx.http.clone(), new_message.channel_id);
-            for attachment in new_message.attachments{
-                let ctx_clone=(&ctx).clone();
-                tokio::spawn(async move {
-                    let channel_id=new_message.channel_id;
-                    let _=if attachment.filename.ends_with(".json") && attachment.size<=500_000{
-                        if let Ok(content)=attachment.download().await{
-                            if let Ok(battle_map) = serde_json::from_slice(content.as_slice()) {
-                                match Battle::from_map(battle_map){
-                                    Ok(battle)=>{channel_id.send_message(&ctx_clone, battle.to_message(None)).await},
-                                    Err(err)=>{channel_id.say(&ctx_clone, format!("failed to parse attchment: {} due to error: {}",attachment.filename,err)).await}
+        if self.update_channels.contains(&new_message.channel_id){
+            let channel_id=new_message.channel_id;
+            if new_message.attachments.len()>0{
+                // println!("message in correct channel");
+                let typing=serenity::http::Typing::start(ctx.http.clone(), new_message.channel_id);
+                for attachment in new_message.attachments{
+                    let ctx_clone=(&ctx).clone();
+                    tokio::spawn(async move {
+                        let _=if attachment.filename.ends_with(".json") && attachment.size<=500_000{
+                            if let Ok(content)=attachment.download().await{
+                                if let Ok(battle_map) = serde_json::from_slice(content.as_slice()) {
+                                    match Battle::from_map(battle_map){
+                                        Ok(battle)=>{channel_id.send_message(&ctx_clone, battle.to_message(None)).await},
+                                        Err(err)=>{channel_id.say(&ctx_clone, format!("failed to parse attchment: {} due to error: {}",attachment.filename,err)).await}
+                                    }
                                 }
-                            }
-                            else{
-                                channel_id.say(&ctx_clone, format!("failed to parse attachment: {}",attachment.filename)).await
+                                else{
+                                    channel_id.say(&ctx_clone, format!("failed to parse attachment: {}",attachment.filename)).await
+                                }
+                            }else{
+                                channel_id.say(&ctx_clone, format!("failed to download attachment: {}",attachment.filename)).await
                             }
                         }else{
-                            channel_id.say(&ctx_clone, format!("failed to download attachment: {}",attachment.filename)).await
-                        }
-                    }else{
-                        channel_id.say(&ctx_clone, format!("attachment: {} is too large or has wrong extention",attachment.filename)).await
-                    };
-                });
+                            channel_id.say(&ctx_clone, format!("attachment: {} is too large or has wrong extention",attachment.filename)).await
+                        };
+                    });
+                }
+                typing.stop();
+            }else if new_message.content.starts_with("/stats"){
+                if let Some((_,name))=new_message.content.split_once(' '){
+                    let _ =channel_id.say(ctx,self.stats.to_string(Some(name))).await;
+                }else{
+                    //list names
+                    let _=channel_id.say(ctx,self.stats.to_string(None)+"\nCommand format /stats Name").await;
+                }
             }
-            typing.stop();
         }
     }
 

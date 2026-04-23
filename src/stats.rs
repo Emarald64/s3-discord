@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tokio::task::JoinSet;
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::ops::AddAssign;
 use crate::battle::*;
 // use std::path::Path;
@@ -60,6 +61,31 @@ impl AllStats{
         tasks.join_all().await;
         Ok(Arc::into_inner(stats).expect("not all stats instances were dropped").into_inner()?)
     }
+
+    pub fn to_string(&self,name:Option<&str>)->String{
+        match name{
+            Some(name)=>{
+                match self.player_stats.get(name){
+                    Some(player_stats)=>{
+                        const HEADER:&str="Games Wins   Losses K/G D/G K/D";
+                        let mut weapon_stats:Vec<(&String,&StatBreakdown)>=player_stats.weapon_stats.iter().collect();
+                        weapon_stats.sort_by_key(|stat|{u32::MAX-stat.1.games});
+                        let weapon_stats_formatted=weapon_stats[..usize::min(5,weapon_stats.len())].iter().fold(String::new(), |acc,stat|{
+                            format!("{acc}\n{:20}{}",stat.0,stat.1)
+                        });
+                        let mut mode_stats:Vec<(&Mode,&StatBreakdown)>=player_stats.mode_stats.iter().collect();
+                        mode_stats.sort_by_key(|stat|{stat.1.games});
+                        let mode_stats_formatted=mode_stats.iter().fold(String::new(), |acc,stat|{
+                            format!("{acc}\n{:15}{}",stat.0.to_string(),stat.1)
+                        });
+                        format!("```     {HEADER}\nTotal {}\nWeapons             {HEADER}{weapon_stats_formatted}\n\nMode         {HEADER}{mode_stats_formatted}```",player_stats.total_stats)
+                    },
+                    None=>format!("player {} not found",name)
+                }
+            },
+            None=>self.player_stats.keys().fold(String::from("Tracked players: "), |acc,name|{acc+name+" , "})
+        }
+    }
 }
 
 
@@ -88,6 +114,12 @@ struct StatBreakdown{
     deaths:u32,
     specials:u32,
     points:u32,
+}
+
+impl Display for StatBreakdown{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f,"{:5} {:6} {:6} {:.2} {:.2} {:.2}",self.games,self.wins,self.losses, self.games as f32 / self.kills as f32, self.deaths as f32 / self.games as f32, self.kills as f32/self.deaths as f32)
+    }
 }
 
 impl AddAssign<&Player> for StatBreakdown{
