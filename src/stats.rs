@@ -13,32 +13,16 @@ use serde_json;
 
 const STATS_PATH:&str="stats.json";
 
-#[derive(Serialize,Deserialize,Default,Debug)]
-pub struct AllStats{
-    player_stats:HashMap<String,TotalPlayerStats>,
-    wins:u32,
-    losses:u32,
-    time_spent:u32,
-}
+// #[derive(Serialize,Deserialize,Default,Debug)]
+// pub struct AllStats{
+//     player_stats:HashMap<String,TotalPlayerStats>,
+//     wins:u32,
+//     losses:u32,
+//     time_spent:u32,
+// }
 
-impl AllStats{
-    pub fn add_game(&mut self, battle: &Battle, tracked_players:&Vec<String>) {
-        match battle.result{
-            BattleResult::Win=>{self.wins+=1;},
-            BattleResult::Lose=>{self.losses+=1;},
-            _=>()
-        }
-        for player in &battle.our_players{
-            if tracked_players.contains(&player.name){
-                //player is one of the tracked player, add stats
-                self.player_stats.entry(player.name.clone()).or_insert(TotalPlayerStats::default()).add_game(player, battle.mode);
-                if let Err(err)=write_tracked_stats(self){dbg!(err);}
-            }
-        }
-        self.time_spent+=battle.duration as u32;
-    }
-    pub async fn from_past_games(results_dir: &str, tracked_players:Vec<String>)->anyhow::Result<Self>{
-        let stats=Arc::new(Mutex::new(Self::default()));
+pub async fn from_past_games(results_dir: &str, tracked_players:Vec<String>)->anyhow::Result<HashMap<String,TotalPlayerStats>>{
+        let stats=Arc::new(Mutex::new(HashMap::new()));
         let mut tasks=JoinSet::new();
         let tracked_players=Arc::new(tracked_players);
         for entry in fs::read_dir(results_dir)?{
@@ -52,45 +36,30 @@ impl AllStats{
                         && let Ok(map)=serde_json::from_slice(buf.as_slice())
                         && let Ok(battle)=Battle::from_map(map){
                             let mut stats=stats.lock().unwrap();
-                            stats.add_game(&battle, &tracked_players);
+                            add_game(&mut stats,&battle, &tracked_players);
                         }
                     }
                 });
             }
         }
         tasks.join_all().await;
-        Ok(Arc::into_inner(stats).expect("not all stats instances were dropped").into_inner()?)
+        let stats=Arc::into_inner(stats).expect("not all stats instances were dropped").into_inner()?;
+        let _ = write_tracked_stats(&stats);
+        Ok(stats)
     }
 
-    pub fn to_string(&self,name:Option<&str>)->String{
-        match name{
-            Some(name)=>{
-                match self.player_stats.get(name){
-                    Some(player_stats)=>{
-                        const HEADER:&str="Games Wins   Losses K/G D/G K/D";
-                        let mut weapon_stats:Vec<(&String,&StatBreakdown)>=player_stats.weapon_stats.iter().collect();
-                        weapon_stats.sort_by_key(|stat|{u32::MAX-stat.1.games});
-                        let weapon_stats_formatted=weapon_stats[..usize::min(5,weapon_stats.len())].iter().fold(String::new(), |acc,stat|{
-                            format!("{acc}\n{:20}{}",stat.0,stat.1)
-                        });
-                        let mut mode_stats:Vec<(&Mode,&StatBreakdown)>=player_stats.mode_stats.iter().collect();
-                        mode_stats.sort_by_key(|stat|{stat.1.games});
-                        let mode_stats_formatted=mode_stats.iter().fold(String::new(), |acc,stat|{
-                            format!("{acc}\n{:15}{}",stat.0.to_string(),stat.1)
-                        });
-                        format!("```     {HEADER}\nTotal {}\nWeapons             {HEADER}{weapon_stats_formatted}\n\nMode         {HEADER}{mode_stats_formatted}```",player_stats.total_stats)
-                    },
-                    None=>format!("player {} not found",name)
-                }
-            },
-            None=>self.player_stats.keys().fold(String::from("Tracked players: "), |acc,name|{acc+name+" , "})
+pub fn add_game(stats:&mut HashMap<String,TotalPlayerStats>,battle:&Battle,tracked_players:&Vec<String>){
+    for player in &battle.our_players{
+        if tracked_players.contains(&player.name){
+            stats.entry(player.name.clone()).or_insert(TotalPlayerStats::default()).add_game(&player, battle.mode);
         }
     }
 }
 
 
+
 #[derive(Deserialize,Serialize,Default,Debug)]
-struct TotalPlayerStats{
+pub struct TotalPlayerStats{
     total_stats:StatBreakdown,
     weapon_stats:HashMap<String,StatBreakdown>,
     mode_stats:HashMap<Mode,StatBreakdown>
@@ -101,6 +70,21 @@ impl TotalPlayerStats{
         self.total_stats+=player;
         self.weapon_stats.entry(player.weapon.clone()).and_modify(|weapon_stat|{*weapon_stat+=player;}).or_insert(StatBreakdown::from(player));
         self.mode_stats.entry(mode).and_modify(|mode_stat|{*mode_stat+=player;}).or_insert(StatBreakdown::from(player));
+    }
+
+    pub fn to_string(&self)->String{
+        const HEADER:&str="Games  Wins Losses    K/G   D/G   K/D";
+        let mut weapon_stats:Vec<(&String,&StatBreakdown)>=self.weapon_stats.iter().collect();
+        weapon_stats.sort_by_key(|stat|{u32::MAX-stat.1.games});
+        let weapon_stats_formatted=weapon_stats[..usize::min(5,weapon_stats.len())].iter().fold(String::new(), |acc,stat|{
+            format!("{acc}\n{:20}{}",stat.0,stat.1)
+        });
+        let mut mode_stats:Vec<(&Mode,&StatBreakdown)>=self.mode_stats.iter().collect();
+        mode_stats.sort_by_key(|stat|{stat.1.games});
+        let mode_stats_formatted=mode_stats.iter().fold(String::new(), |acc,stat|{
+            format!("{acc}\n{:20}{}",stat.0.to_string(),stat.1)
+        });
+        format!("```                    {HEADER}\nTotal               {}\n\nWeapons             {HEADER}{weapon_stats_formatted}\n\nMode                {HEADER}{mode_stats_formatted}```",self.total_stats)
     }
 }
 
@@ -118,7 +102,7 @@ struct StatBreakdown{
 
 impl Display for StatBreakdown{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,"{:5} {:6} {:6} {:.2} {:.2} {:.2}",self.games,self.wins,self.losses, self.games as f32 / self.kills as f32, self.deaths as f32 / self.games as f32, self.kills as f32/self.deaths as f32)
+        write!(f,"{:5} {:5}  {:5}  {:5.2} {:5.2} {:5.2}",self.games,self.wins,self.losses, self.kills as f32 / (self.games as f32) , self.deaths as f32 / (self.games as f32), self.kills as f32/self.deaths as f32)
     }
 }
 
@@ -144,18 +128,18 @@ impl From<&Player> for StatBreakdown{
     }
 }
 
-pub fn get_tracked_stats()->anyhow::Result<AllStats>{
+pub fn get_tracked_stats()->anyhow::Result<Option<HashMap<String,TotalPlayerStats>>>{
     // let stats_path:&Path=Path::new(STATS_PATH);
     if fs::exists(STATS_PATH)?{
         anyhow::ensure!(fs::metadata(STATS_PATH)?.is_file(),"stats.json cant be a folder");
         let stats_file=File::open(STATS_PATH)?;
-        Ok(serde_json::from_reader(stats_file)?)
+        Ok(Some(serde_json::from_reader(stats_file)?))
     }else{
-        Ok(AllStats::default())
+        Ok(None)
     }
 }
 
-pub fn write_tracked_stats(stats:&AllStats)->anyhow::Result<()>{
+pub fn write_tracked_stats(stats:&HashMap<String,TotalPlayerStats>)->anyhow::Result<()>{
     // let stats_path:&Path=Path::new(STATS_PATH);
     let file=File::create(STATS_PATH)?;
     Ok(serde_json::to_writer_pretty(file, stats)?)

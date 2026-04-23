@@ -4,7 +4,7 @@ use notify::{self, Event, EventKind, Watcher, event};
 use serde::Deserialize;
 // use serde_json::Value;
 // use std::io::Read;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 use std::time::Duration;
 // use std::{fmt::Display};
 // use std::str::FromStr;
@@ -36,12 +36,8 @@ async fn main() -> anyhow::Result<()>{
         // config_file.read_to_string(&mut config_buf)?;
         config=serde_json::from_reader(&config_file)?;
     }
-    // dbg!(&config);
-    // println!("scanning all games");
-    // let stats=AllStats::from_past_games(&config.results_dir, config.tracked_players.clone()).await?;
-    let stats=get_tracked_stats()?;
-    let _ =println!("{}",stats.to_string(None));
-    let results_path=PathBuf::from(config.results_dir);
+
+    let results_path=PathBuf::from(&config.results_dir);
 
     let intents=if config.recive_messages{ GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT} else {GatewayIntents::GUILD_MESSAGES};
     //setup notify to check s3s results folder
@@ -50,7 +46,14 @@ async fn main() -> anyhow::Result<()>{
     watcher.watch(&results_path, notify::RecursiveMode::NonRecursive)?;
 
     //read saved stats
-    let mut stats=Arc::new(get_tracked_stats()?);
+    let stats=Arc::new(
+        match get_tracked_stats()?{
+            Some(stats)=>stats,
+            None=>from_past_games(&config.results_dir, config.tracked_players.clone()).await?
+        }
+    );
+
+    dbg!(&stats);
 
     //setup discord
     let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{results_path:results_path,update_channels:config.updates_channel_ids.clone(), stats:stats}).await?;
@@ -110,7 +113,7 @@ async fn main() -> anyhow::Result<()>{
 struct Handeler{
     results_path:PathBuf,
     update_channels:Vec<ChannelId>,
-    stats:Arc<AllStats>,
+    stats:Arc<HashMap<String,TotalPlayerStats>>,
 }
 
 #[async_trait]
@@ -157,6 +160,7 @@ impl EventHandler for Handeler{
 
     async fn message(&self,ctx:Context,new_message:Message){
         if self.update_channels.contains(&new_message.channel_id){
+            dbg!(&new_message.content);
             let channel_id=new_message.channel_id;
             if new_message.attachments.len()>0{
                 // println!("message in correct channel");
@@ -185,11 +189,13 @@ impl EventHandler for Handeler{
                 }
                 typing.stop();
             }else if new_message.content.starts_with("/stats"){
-                if let Some((_,name))=new_message.content.split_once(' '){
-                    let _ =channel_id.say(ctx,self.stats.to_string(Some(name))).await;
+                println!("stats command");
+                if let Some((_,name))=new_message.content.split_once(' ')
+                && self.stats.contains_key(name){
+                    let _ =channel_id.say(ctx,self.stats.get(name).unwrap().to_string()).await;
                 }else{
                     //list names
-                    let _=channel_id.say(ctx,self.stats.to_string(None)+"\nCommand format /stats Name").await;
+                    let _=channel_id.say(ctx,self.stats.keys().fold(String::new(), |acc,name|{format!("{acc} {name},")})+"\nCommand format: /stats Name").await;
                 }
             }
         }
