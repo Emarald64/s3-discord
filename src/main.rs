@@ -9,7 +9,7 @@ use std::time::Duration;
 // use std::{fmt::Display};
 // use std::str::FromStr;
 use anyhow::bail;
-use std::{sync::{mpsc,Arc},fs::{File,self}};
+use std::{sync::{mpsc,Arc,Mutex},fs::{File,self}};
 use crate::{battle::*,stats::*};
 // use std::{fs};
 
@@ -46,17 +46,18 @@ async fn main() -> anyhow::Result<()>{
     watcher.watch(&results_path, notify::RecursiveMode::NonRecursive)?;
 
     //read saved stats
-    let stats=Arc::new(
-        match get_tracked_stats()?{
-            Some(stats)=>stats,
-            None=>from_past_games(&config.results_dir, config.tracked_players.clone()).await?
-        }
+    let stats=Arc::new(Mutex::new(
+            match get_tracked_stats()?{
+                Some(stats)=>stats,
+                None=>from_past_games(&config.results_dir, config.tracked_players.clone()).await?
+            }
+        )
     );
 
-    dbg!(&stats);
+    // dbg!(&stats);
 
     //setup discord
-    let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{results_path:results_path,update_channels:config.updates_channel_ids.clone(), stats:stats}).await?;
+    let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{results_path:results_path,update_channels:config.updates_channel_ids.clone(), stats:Arc::clone(&stats)}).await?;
     let http= Arc::clone(&client.http);
     tokio::task::spawn(async move {let _=client.start().await;});
     loop{
@@ -87,12 +88,17 @@ async fn main() -> anyhow::Result<()>{
                         Ok(battle)=>{
                             if !config.excluded_modes.contains(&battle.mode) || !config.excluded_lobbies.contains(&battle.lobby){
                                 println!("{}",&battle);
-                                
-                                for player in &battle.our_players{
-                                    if config.tracked_players.contains(&player.name){
-
-                                    }
+                                if let Ok(mut stats)=stats.lock(){
+                                    add_game(&mut stats,&battle,&config.tracked_players);
                                 }
+
+                                // for player in &battle.our_players{
+                                //     if config.tracked_players.contains(&player.name){
+                                //         if let Some(player_stats)=stats.get_mut(&player.name){
+                                //             player_stats
+                                //         }
+                                //     }
+                                // }
                                 // post log to discord
                                 for channel_id in &config.updates_channel_ids{
                                     let _=channel_id.send_message(&http, battle.to_message(Some(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await;
@@ -113,7 +119,7 @@ async fn main() -> anyhow::Result<()>{
 struct Handeler{
     results_path:PathBuf,
     update_channels:Vec<ChannelId>,
-    stats:Arc<HashMap<String,TotalPlayerStats>>,
+    stats:Arc<Mutex<HashMap<String,TotalPlayerStats>>>,
 }
 
 #[async_trait]
@@ -160,7 +166,7 @@ impl EventHandler for Handeler{
 
     async fn message(&self,ctx:Context,new_message:Message){
         if self.update_channels.contains(&new_message.channel_id){
-            dbg!(&new_message.content);
+            // dbg!(&new_message.content);
             let channel_id=new_message.channel_id;
             if new_message.attachments.len()>0{
                 // println!("message in correct channel");
@@ -190,12 +196,22 @@ impl EventHandler for Handeler{
                 typing.stop();
             }else if new_message.content.starts_with("/stats"){
                 println!("stats command");
-                if let Some((_,name))=new_message.content.split_once(' ')
-                && self.stats.contains_key(name){
-                    let _ =channel_id.say(ctx,self.stats.get(name).unwrap().to_string()).await;
-                }else{
-                    //list names
-                    let _=channel_id.say(ctx,self.stats.keys().fold(String::new(), |acc,name|{format!("{acc} {name},")})+"\nCommand format: /stats Name").await;
+                let message=match self.stats.lock(){
+                    Ok(stats)=>{
+                        Some(channel_id.say(ctx,
+                        if let Some((_,name))=new_message.content.split_once(' ')
+                        && stats.contains_key(name){
+                            stats.get(name).unwrap().to_string()
+                        }else{
+                            //list names
+                            stats.keys().fold(String::new(), |acc,name|{format!("{acc} {name},")})+"\nCommand format: /stats Name"
+                        }
+                        ))
+                    },
+                    Err(_)=>None
+                };
+                if let Some(message)=message{
+                    let _=message.await;
                 }
             }
         }
