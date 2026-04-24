@@ -2,6 +2,7 @@ use serenity::all::Interaction;
 use tokio;
 use notify::{self, Event, EventKind, Watcher, event};
 use serde::Deserialize;
+use std::env;
 // use serde_json::Value;
 // use std::io::Read;
 use std::{collections::HashMap, path::PathBuf};
@@ -239,9 +240,12 @@ struct Config{
 }
 
 async fn auto_update_loop(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_config_path:Option<String>){
-    let mut update_games_interval=tokio::time::interval(Duration::from_mins(30));
+    let mut update_games_interval=tokio::time::interval(Duration::from_hours(1));
     update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    const GAME_UPDATES_BETWEEN_TOKEN_UPDATE:u8=46;
+    if env::args().collect::<Vec<String>>().contains(&String::from("-s")){
+        update_games_interval.reset();
+    }
+    const GAME_UPDATES_BETWEEN_TOKEN_UPDATE:u8=22;
     let mut game_update_count:u8=1;
     tokio::time::sleep(Duration::from_secs(1)).await; //wait to allow for rest of bot to set up
     loop{
