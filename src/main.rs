@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()>{
     // dbg!(&stats);
 
     //setup discord
-    let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{results_path:results_path,update_channels:config.updates_channel_ids.clone(), stats:Arc::clone(&stats)}).await?;
+    let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{results_path:results_path,update_channels:config.updates_channel_ids.clone(), stats:Arc::clone(&stats), tracked_players:config.tracked_players.clone()}).await?;
     let http= Arc::clone(&client.http);
     tokio::spawn(async move {let _=client.start().await;});
     tokio::spawn(auto_update_loop(config.s3s_path, config.nxapi_path, config.s3s_config_path));
@@ -121,6 +121,7 @@ struct Handeler{
     results_path:PathBuf,
     update_channels:Vec<ChannelId>,
     stats:Arc<Mutex<HashMap<String,TotalPlayerStats>>>,
+    tracked_players:Vec<String>
 }
 
 #[async_trait]
@@ -205,7 +206,7 @@ impl EventHandler for Handeler{
                             stats.get(&name.to_uppercase()).unwrap().to_string()
                         }else{
                             //list names
-                            stats.keys().fold(String::new(), |acc,name|{format!("{acc} {name},")})+"\nCommand format: /stats Name"
+                            self.tracked_players.iter().fold(String::new(), |acc,name|{format!("{acc} {name},")})+"\nCommand format: /stats Name"
                         }
                         ))
                     },
@@ -240,7 +241,7 @@ struct Config{
 async fn auto_update_loop(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_config_path:Option<String>){
     let mut update_games_interval=tokio::time::interval(Duration::from_mins(30));
     update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    const GAME_UPDATES_BETWEEN_TOKEN_UPDATE:u8=47;
+    const GAME_UPDATES_BETWEEN_TOKEN_UPDATE:u8=46;
     let mut game_update_count:u8=1;
     tokio::time::sleep(Duration::from_secs(1)).await; //wait to allow for rest of bot to set up
     loop{
