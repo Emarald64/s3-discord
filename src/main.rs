@@ -248,7 +248,7 @@ async fn auto_update_loop(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_
         if let Some(s3s_path) =&s3s_path 
         && !s3s_path.is_empty(){
             let _ =std::process::Command::new("python3")
-            .arg(s3s_path)
+            .args(vec!(s3s_path,"-o"))
             .spawn();
         }
         if game_update_count==GAME_UPDATES_BETWEEN_TOKEN_UPDATE
