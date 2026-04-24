@@ -37,6 +37,16 @@ Run the bot with `cargo run -r` then, in another terminal tab, export battles by
 
 s3s needs to be reran every time you want to upload new battles and nxapi needs to be reran about once a day to get new tokens for s3s
 
+### Total stat tracking
+
+Put the names of the players(case sensitive) in tracked_players in config.json 
+
+### Automaticily update token and games
+
+To automaticily get new games every 30 minutes, put the path for s3s.py in s3s_path in config.json (e.g. "s3s_path" : "/path/to/s3s/s3s.py")
+
+to refresh your token once a day put the path to the s3s config.txt and nxapi executable into s3s_config_path and nxapi_path respectivly in config.json
+
 ## Notes
 
-To allow people to upload their battle logs set "recive_messages" in config.json to true and enable Message Content Intent on discord devleloper dashboard
+To allow people to use the /stats command or upload their battle logs set "recive_messages" in config.json to true and enable Message Content Intent on discord devleloper dashboard

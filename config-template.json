@@ -5,5 +5,8 @@
     "discord_token" : "",
     "updates_channel_ids" : [],
     "recive_messages" : false,
-    "tracked_players" : []
+    "tracked_players" : ["Example","Names"],
+    "s3s_path" : "",
+    "nxapi_path" : "",
+    "s3s_config_path" : ""
 }

@@ -59,7 +59,8 @@ async fn main() -> anyhow::Result<()>{
     //setup discord
     let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{results_path:results_path,update_channels:config.updates_channel_ids.clone(), stats:Arc::clone(&stats)}).await?;
     let http= Arc::clone(&client.http);
-    tokio::task::spawn(async move {let _=client.start().await;});
+    tokio::spawn(async move {let _=client.start().await;});
+    tokio::spawn(auto_update_loop(config.s3s_path, config.nxapi_path, config.s3s_config_path));
     loop{
         // wait for new log
         match rx.recv(){
@@ -230,6 +231,35 @@ struct Config{
     discord_token:String,
     updates_channel_ids:Vec<ChannelId>,
     recive_messages:bool,
-    tracked_players:Vec<String>
+    tracked_players:Vec<String>,
+    s3s_path:Option<String>,
+    nxapi_path:Option<String>,
+    s3s_config_path:Option<String>
 }
 
+async fn auto_update_loop(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_config_path:Option<String>){
+    let mut update_games_interval=tokio::time::interval(Duration::from_mins(30));
+    update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    const GAME_UPDATES_BETWEEN_TOKEN_UPDATE:u8=47;
+    let mut game_update_count:u8=1;
+    tokio::time::sleep(Duration::from_secs(1)).await; //wait to allow for rest of bot to set up
+    loop{
+        update_games_interval.tick().await;
+        if let Some(s3s_path) =&s3s_path 
+        && !s3s_path.is_empty(){
+            let _ =std::process::Command::new("python3")
+            .arg(s3s_path)
+            .spawn();
+        }
+        if game_update_count==GAME_UPDATES_BETWEEN_TOKEN_UPDATE
+        && let Some(nxapi_path)=&nxapi_path && !nxapi_path.is_empty()
+        && let Some(s3s_config_path)=&s3s_config_path && !s3s_config_path.is_empty(){
+            let _ =std::process::Command::new(nxapi_path)
+            .args(vec!("util","update-s3s-token"))
+            .arg(s3s_config_path)
+            .spawn();
+            game_update_count=0;
+        }
+        game_update_count+=1;
+    }
+}
