@@ -51,7 +51,7 @@ pub async fn from_past_games(results_dir: &str, tracked_players:Vec<String>)->an
 pub fn add_game(stats:&mut HashMap<String,TotalPlayerStats>,battle:&Battle,tracked_players:&Vec<String>){
     for player in &battle.our_players{
         if tracked_players.contains(&player.name){
-            stats.entry(player.name.clone()).or_insert(TotalPlayerStats::default()).add_game(&player, battle.mode);
+            stats.entry(player.name.to_uppercase()).or_insert(TotalPlayerStats::default()).add_game(&player, battle.mode);
         }
     }
 }

@@ -201,7 +201,7 @@ impl EventHandler for Handeler{
                         Some(channel_id.say(ctx,
                         if let Some((_,name))=new_message.content.split_once(' ')
                         && stats.contains_key(name){
-                            stats.get(name).unwrap().to_string()
+                            stats.get(&name.to_uppercase()).unwrap().to_string()
                         }else{
                             //list names
                             stats.keys().fold(String::new(), |acc,name|{format!("{acc} {name},")})+"\nCommand format: /stats Name"
