@@ -203,8 +203,8 @@ impl EventHandler for Handeler{
                     Ok(stats)=>{
                         Some(channel_id.say(ctx,
                         if let Some((_,name))=new_message.content.split_once(' ')
-                        && stats.contains_key(name){
-                            stats.get(&name.to_uppercase()).unwrap().to_string()
+                        && let Some(player_stats)=stats.get(&name.to_uppercase()){
+                            player_stats.to_string()
                         }else{
                             //list names
                             self.tracked_players.iter().fold(String::new(), |acc,name|{format!("{acc} {name},")})+"\nCommand format: /stats Name"
