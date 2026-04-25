@@ -6,6 +6,7 @@
     "updates_channel_ids" : [],
     "recive_messages" : false,
     "tracked_players" : ["Example","Names"],
+    "update_game_interval": 30,
     "s3s_path" : "",
     "nxapi_path" : "",
     "s3s_config_path" : ""

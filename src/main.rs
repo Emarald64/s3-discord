@@ -2,6 +2,7 @@ use serenity::all::Interaction;
 use tokio;
 use notify::{self, Event, EventKind, Watcher, event};
 use serde::Deserialize;
+use tokio::time::Instant;
 use std::env;
 // use serde_json::Value;
 // use std::io::Read;
@@ -46,6 +47,8 @@ async fn main() -> anyhow::Result<()>{
     let mut watcher = notify::recommended_watcher(tx)?;
     watcher.watch(&results_path, notify::RecursiveMode::NonRecursive)?;
 
+    start_auto_update(config.s3s_path, config.nxapi_path, config.s3s_config_path,config.update_game_interval.unwrap_or(30));
+
     //read saved stats
     let stats=Arc::new(Mutex::new(
             match get_tracked_stats()?{
@@ -61,7 +64,6 @@ async fn main() -> anyhow::Result<()>{
     let mut client=Client::builder(config.discord_token, intents).event_handler(Handeler{results_path:results_path,update_channels:config.updates_channel_ids.clone(), stats:Arc::clone(&stats), tracked_players:config.tracked_players.clone()}).await?;
     let http= Arc::clone(&client.http);
     tokio::spawn(async move {let _=client.start().await;});
-    tokio::spawn(auto_update_loop(config.s3s_path, config.nxapi_path, config.s3s_config_path));
     loop{
         // wait for new log
         match rx.recv(){
@@ -236,36 +238,49 @@ struct Config{
     tracked_players:Vec<String>,
     s3s_path:Option<String>,
     nxapi_path:Option<String>,
-    s3s_config_path:Option<String>
+    s3s_config_path:Option<String>,
+    update_game_interval:Option<u64>,
 }
 
-async fn auto_update_loop(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_config_path:Option<String>){
-    let mut update_games_interval=tokio::time::interval(Duration::from_hours(1));
-    update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    if env::args().collect::<Vec<String>>().contains(&String::from("-s")){
-        update_games_interval.reset();
+fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_config_path:Option<String>,update_minutes:u64){
+    let start_time=Instant::now();
+    // spawn game updater
+    if let Some(s3s_path) =s3s_path 
+    && !s3s_path.is_empty(){
+        tokio::spawn(async move {
+            let mut update_games_interval=tokio::time::interval(Duration::from_mins(update_minutes));
+            update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            update_games_interval.reset_after(
+                if env::args().collect::<Vec<String>>().contains(&String::from("-s")){
+                    update_games_interval.period()
+                }else{
+                    Duration::from_secs(30) // allow time for token to be updated
+                });
+            loop{
+                //update games
+                let time=update_games_interval.tick().await;
+                println!("updating games at {} mins since start ...",(time-start_time).as_secs()/60);
+                let _=std::process::Command::new("python3")
+                .args(vec!(&s3s_path,"-o"))
+                .spawn();
+            }
+        });
     }
-    const GAME_UPDATES_BETWEEN_TOKEN_UPDATE:u8=22;
-    let mut game_update_count:u8=0;
-    tokio::time::sleep(Duration::from_secs(1)).await; //wait to allow for rest of bot to set up
-    loop{
-        update_games_interval.tick().await;
-        if game_update_count==0
-        && let Some(nxapi_path)=&nxapi_path && !nxapi_path.is_empty()
-        && let Some(s3s_config_path)=&s3s_config_path && !s3s_config_path.is_empty(){
-            //update tokens
-            let _ =std::process::Command::new(nxapi_path)
-            .args(vec!("util","update-s3s-token",s3s_config_path))
-            .spawn();
-            game_update_count=GAME_UPDATES_BETWEEN_TOKEN_UPDATE;
-        }
-        if let Some(s3s_path) =&s3s_path 
-        && !s3s_path.is_empty(){
-            //update games
-            let _ =std::process::Command::new("python3")
-            .args(vec!(s3s_path,"-o"))
-            .spawn();
-        }
-        game_update_count-=1;
+    
+    if let Some(nxapi_path)=nxapi_path && !nxapi_path.is_empty()
+    && let Some(s3s_config_path)=s3s_config_path && !s3s_config_path.is_empty(){
+        //update tokens
+        tokio::spawn(async move{
+            let mut update_games_interval=tokio::time::interval(Duration::from_hours(20));
+            update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop{
+                let time=update_games_interval.tick().await;
+                println!("updating token at {} mins since start ...",(time-start_time).as_secs()/60);
+                let _ =std::process::Command::new(&nxapi_path)
+                .args(vec!("util","update-s3s-token",&s3s_config_path))
+                .spawn();
+            }
+
+        });
     }
 }
