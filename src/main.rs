@@ -273,7 +273,7 @@ fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_confi
     && let Some(s3s_config_path)=s3s_config_path && !s3s_config_path.is_empty(){
         //update tokens
         tokio::spawn(async move{
-            let mut update_games_interval=tokio::time::interval(Duration::from_hours(20));
+            let mut update_games_interval=tokio::time::interval(Duration::from_hours(1));
             update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop{
                 let time=update_games_interval.tick().await;
