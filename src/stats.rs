@@ -73,7 +73,7 @@ impl TotalPlayerStats{
     }
 
     pub fn to_string(&self)->String{
-        const HEADER:&str="Games  Wins Losses    K/G   D/G   K/D";
+        const HEADER:&str="Games Win/Loss  K/G   A/G   D/G   K/D";
         let mut weapon_stats:Vec<(&String,&StatBreakdown)>=self.weapon_stats.iter().collect();
         weapon_stats.sort_by_key(|stat|{u32::MAX-stat.1.games});
         let weapon_stats_formatted=weapon_stats[..usize::min(5,weapon_stats.len())].iter().fold(String::new(), |acc,stat|{
@@ -102,7 +102,7 @@ struct StatBreakdown{
 
 impl Display for StatBreakdown{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,"{:5} {:5}  {:5}  {:5.2} {:5.2} {:5.2}",self.games,self.wins,self.losses, self.kills as f32 / (self.games as f32) , self.deaths as f32 / (self.games as f32), self.kills as f32/self.deaths as f32)
+        write!(f,"{:5}    {:5.2} {:5.2} {:5.2} {:5.2} {:5.2}",self.games,self.wins as f32 / self.losses as f32, self.kills as f32 / (self.games as f32) ,self.assists as f32 / (self.games as f32), self.deaths as f32 / (self.games as f32), self.kills as f32/self.deaths as f32)
     }
 }
 

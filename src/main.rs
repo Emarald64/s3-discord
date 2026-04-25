@@ -95,14 +95,7 @@ async fn main() -> anyhow::Result<()>{
                                 if battle.result.RegularResult() && let Ok(mut stats)=stats.lock(){
                                     add_game(&mut stats,&battle,&config.tracked_players);
                                 }
-
-                                // for player in &battle.our_players{
-                                //     if config.tracked_players.contains(&player.name){
-                                //         if let Some(player_stats)=stats.get_mut(&player.name){
-                                //             player_stats
-                                //         }
-                                //     }
-                                // }
+                                
                                 // post log to discord
                                 for channel_id in &config.updates_channel_ids{
                                     let _=channel_id.send_message(&http, battle.to_message(Some(path.file_name().expect("File path ends in ..").to_str().expect("string is not valid utf-8")))).await;
