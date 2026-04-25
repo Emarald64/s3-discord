@@ -171,6 +171,12 @@ pub enum BattleResult{
     Unknown,
 }
 
+impl BattleResult{
+    pub fn RegularResult(&self)->bool{
+        [BattleResult::Lose,BattleResult::Win].contains(self) 
+    }
+}
+
 impl FromStr for BattleResult{
     type Err=anyhow::Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {

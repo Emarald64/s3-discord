@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()>{
                         Ok(battle)=>{
                             if !config.excluded_modes.contains(&battle.mode) || !config.excluded_lobbies.contains(&battle.lobby){
                                 println!("{}",&battle);
-                                if let Ok(mut stats)=stats.lock(){
+                                if battle.result.RegularResult() && let Ok(mut stats)=stats.lock(){
                                     add_game(&mut stats,&battle,&config.tracked_players);
                                 }
 
