@@ -246,25 +246,26 @@ async fn auto_update_loop(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_
         update_games_interval.reset();
     }
     const GAME_UPDATES_BETWEEN_TOKEN_UPDATE:u8=22;
-    let mut game_update_count:u8=1;
+    let mut game_update_count:u8=0;
     tokio::time::sleep(Duration::from_secs(1)).await; //wait to allow for rest of bot to set up
     loop{
         update_games_interval.tick().await;
+        if game_update_count==0
+        && let Some(nxapi_path)=&nxapi_path && !nxapi_path.is_empty()
+        && let Some(s3s_config_path)=&s3s_config_path && !s3s_config_path.is_empty(){
+            //update tokens
+            let _ =std::process::Command::new(nxapi_path)
+            .args(vec!("util","update-s3s-token",s3s_config_path))
+            .spawn();
+            game_update_count=GAME_UPDATES_BETWEEN_TOKEN_UPDATE;
+        }
         if let Some(s3s_path) =&s3s_path 
         && !s3s_path.is_empty(){
+            //update games
             let _ =std::process::Command::new("python3")
             .args(vec!(s3s_path,"-o"))
             .spawn();
         }
-        if game_update_count==GAME_UPDATES_BETWEEN_TOKEN_UPDATE
-        && let Some(nxapi_path)=&nxapi_path && !nxapi_path.is_empty()
-        && let Some(s3s_config_path)=&s3s_config_path && !s3s_config_path.is_empty(){
-            let _ =std::process::Command::new(nxapi_path)
-            .args(vec!("util","update-s3s-token"))
-            .arg(s3s_config_path)
-            .spawn();
-            game_update_count=0;
-        }
-        game_update_count+=1;
+        game_update_count-=1;
     }
 }
