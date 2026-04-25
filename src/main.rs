@@ -10,7 +10,7 @@ use std::{collections::HashMap, path::PathBuf};
 use std::time::Duration;
 // use std::{fmt::Display};
 // use std::str::FromStr;
-use anyhow::bail;
+use anyhow::{bail,anyhow};
 use std::{sync::{mpsc,Arc,Mutex},fs::{File,self}};
 use crate::{battle::*,stats::*};
 // use std::{fs};
@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()>{
     let mut watcher = notify::recommended_watcher(tx)?;
     watcher.watch(&results_path, notify::RecursiveMode::NonRecursive)?;
 
-    start_auto_update(config.s3s_path, config.nxapi_path, config.s3s_config_path,config.update_game_interval.unwrap_or(30));
+    start_auto_update(config.s3s_path, config.nxapi_path, config.s3s_config_path,config.update_game_interval.unwrap_or(30),results_path.parent().map(|path|path.parent()).flatten().ok_or(anyhow!("invalid results path"))?.to_path_buf());
 
     //read saved stats
     let stats=Arc::new(Mutex::new(
@@ -200,7 +200,7 @@ impl EventHandler for Handeler{
                 }
                 typing.stop();
             }else if new_message.content.starts_with("/stats"){
-                println!("stats command");
+                // println!("stats command");
                 let message=match self.stats.lock(){
                     Ok(stats)=>{
                         Some(channel_id.say(ctx,
@@ -242,7 +242,7 @@ struct Config{
     update_game_interval:Option<u64>,
 }
 
-fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_config_path:Option<String>,update_minutes:u64){
+fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_config_path:Option<String>,update_minutes:u64,s3s_run_path:PathBuf){
     let start_time=Instant::now();
     // spawn game updater
     if let Some(s3s_path) =s3s_path 
@@ -256,13 +256,15 @@ fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_confi
                 }else{
                     Duration::from_secs(30) // allow time for token to be updated
                 });
+            let s3s_path=PathBuf::from(s3s_path);
             loop{
                 //update games
                 let time=update_games_interval.tick().await;
                 println!("updating games at {} mins since start ...",(time-start_time).as_secs()/60);
-                let _=std::process::Command::new("python3")
-                .args(vec!(&s3s_path,"-o"))
-                .spawn();
+                let mut command=std::process::Command::new("python3");
+                command.args(vec!(&s3s_path.to_string_lossy(),"-o"));
+                command.current_dir(&s3s_run_path);
+                let _=command.spawn();
             }
         });
     }
