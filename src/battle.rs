@@ -83,7 +83,7 @@ pub struct Player{
     pub deaths:u8,
     pub specials:u8,
     pub gears:[Gear;3],
-    pub battle_result:Option<BattleResult>,
+    pub battle_result:Option<BattleResult>
 }
 
 impl Player{

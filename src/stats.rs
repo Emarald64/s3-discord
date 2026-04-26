@@ -1,4 +1,6 @@
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use serenity::all::Timestamp;
 use tokio::task::JoinSet;
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -51,7 +53,7 @@ pub async fn from_past_games(results_dir: &str, tracked_players:Vec<String>)->an
 pub fn add_game(stats:&mut HashMap<String,TotalPlayerStats>,battle:&Battle,tracked_players:&Vec<String>){
     for player in &battle.our_players{
         if tracked_players.contains(&player.name){
-            stats.entry(player.name.to_uppercase()).or_insert(TotalPlayerStats::default()).add_game(&player, battle.mode);
+            stats.entry(player.name.to_uppercase()).or_insert(TotalPlayerStats::default()).add_game(&player, battle.mode, battle.timestamp);
         }
     }
 }
@@ -61,18 +63,24 @@ pub fn add_game(stats:&mut HashMap<String,TotalPlayerStats>,battle:&Battle,track
 #[derive(Deserialize,Serialize,Default,Debug)]
 pub struct TotalPlayerStats{
     total_stats:StatBreakdown,
+    todays_stats:StatBreakdown,
+    stats_date:NaiveDate,
     weapon_stats:HashMap<String,StatBreakdown>,
     mode_stats:HashMap<Mode,StatBreakdown>
 }
 
 impl TotalPlayerStats{
-    fn add_game(&mut self,player:&Player,mode:Mode){
+    fn add_game(&mut self,player:&Player,mode:Mode,battle_timestamp:Timestamp){
         self.total_stats+=player;
         self.weapon_stats.entry(player.weapon.clone()).and_modify(|weapon_stat|{*weapon_stat+=player;}).or_insert(StatBreakdown::from(player));
         self.mode_stats.entry(mode).and_modify(|mode_stat|{*mode_stat+=player;}).or_insert(StatBreakdown::from(player));
+        self.check_for_old_day_stats();
+        if (battle_timestamp.with_timezone(&chrono::Local).date_naive())==chrono::Local::now().date_naive(){
+            self.todays_stats+=player;
+        }
     }
 
-    pub fn to_string(&self)->String{
+    pub fn to_string(&mut self)->String{
         const HEADER:&str="Games   Win%  K/G   A/G   D/G   S/G   K/D";
         let mut weapon_stats:Vec<(&String,&StatBreakdown)>=self.weapon_stats.iter().collect();
         weapon_stats.sort_by_key(|stat|{u32::MAX-stat.1.games});
@@ -85,6 +93,13 @@ impl TotalPlayerStats{
             format!("{acc}\n{:20}{}",stat.0.to_string(),stat.1)
         });
         format!("```                    {HEADER}\nTotal               {}\n\nWeapons             {HEADER}{weapon_stats_formatted}\n\nMode                {HEADER}{mode_stats_formatted}```",self.total_stats)
+    }
+
+    fn check_for_old_day_stats(&mut self){
+        if self.stats_date!=chrono::Local::now().date_naive(){
+            self.todays_stats=StatBreakdown::default();
+            self.stats_date=chrono::Local::now().date_naive();
+        }
     }
 }
 

@@ -195,10 +195,10 @@ impl EventHandler for Handeler{
             }else if new_message.content.starts_with("/stats"){
                 // println!("stats command");
                 let message=match self.stats.lock(){
-                    Ok(stats)=>{
+                    Ok(mut stats)=>{
                         Some(channel_id.say(ctx,
                         if let Some((_,name))=new_message.content.split_once(' ')
-                        && let Some(player_stats)=stats.get(&name.to_uppercase()){
+                        && let Some(player_stats)=stats.get_mut(&name.to_uppercase()){
                             player_stats.to_string()
                         }else{
                             //list names
