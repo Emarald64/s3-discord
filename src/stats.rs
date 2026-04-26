@@ -117,7 +117,7 @@ struct StatBreakdown{
 
 impl Display for StatBreakdown{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f,"{:5}  {:4.1}%  {:5.2} {:5.2} {:5.2} {:5.2} {:5.2}",self.games,f32::round((self.wins as f32 / self.games as f32)*100.0), self.kills as f32 / (self.games as f32) ,self.assists as f32 / (self.games as f32), self.deaths as f32 / (self.games as f32),self.specials as f32/self.games as f32, self.kills as f32/self.deaths as f32)
+        write!(f,"{:5}  {:4.1}%  {:5.2} {:5.2} {:5.2} {:5.2} {:5.2}",self.games,(self.wins as f32 / self.games as f32)*100.0, self.kills as f32 / (self.games as f32) ,self.assists as f32 / (self.games as f32), self.deaths as f32 / (self.games as f32),self.specials as f32/self.games as f32, self.kills as f32/self.deaths as f32)
     }
 }
 
