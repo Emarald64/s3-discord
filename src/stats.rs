@@ -92,7 +92,7 @@ impl TotalPlayerStats{
         let mode_stats_formatted=mode_stats.iter().fold(String::new(), |acc,stat|{
             format!("{acc}\n{:20}{}",stat.0.to_string(),stat.1)
         });
-        format!("```                    {HEADER}\nTotal               {}\n\nWeapons             {HEADER}{weapon_stats_formatted}\n\nMode                {HEADER}{mode_stats_formatted}```",self.total_stats)
+        format!("```                    {HEADER}\nTotal               {}\nToday               {}\n\nWeapons             {HEADER}{weapon_stats_formatted}\n\nMode                {HEADER}{mode_stats_formatted}```",self.total_stats,self.todays_stats)
     }
 
     fn check_for_old_day_stats(&mut self){
