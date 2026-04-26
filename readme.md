@@ -15,7 +15,7 @@ Join [my server](https://discord.gg/GNGR5GQz) and send one of the [demo files](d
 
 Or
 
-Watch the [Demo Video](https://youtu.be/y-eNDS-uO9g)
+Watch the [Demo Video](https://youtu.be/y-eNDS-uO9g)(Game summeries) or [Demo Video 2](https://youtu.be/uQ4vYwgpak4)(total stats)
 
 ## How to run it yourself
 
