@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()>{
                         Ok(battle)=>{
                             if !config.excluded_modes.contains(&battle.mode) || !config.excluded_lobbies.contains(&battle.lobby){
                                 println!("{}",&battle);
-                                if battle.result.RegularResult() && let Ok(mut stats)=stats.lock(){
+                                if battle.result.regular_result() && let Ok(mut stats)=stats.lock(){
                                     add_game(&mut stats,&battle,&config.tracked_players);
                                 }
                                 
@@ -245,7 +245,7 @@ fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_confi
             update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             update_games_interval.reset_after(
                 if env::args().collect::<Vec<String>>().contains(&String::from("-s")){
-                    update_games_interval.period()
+                    update_games_interval.period()+Duration::from_secs(30)
                 }else{
                     Duration::from_secs(30) // allow time for token to be updated
                 });

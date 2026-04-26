@@ -172,7 +172,7 @@ pub enum BattleResult{
 }
 
 impl BattleResult{
-    pub fn RegularResult(&self)->bool{
+    pub fn regular_result(&self)->bool{
         [BattleResult::Lose,BattleResult::Win].contains(self) 
     }
 }
