@@ -21,7 +21,7 @@ impl FromStr for Mode{
             "Turf War"=>Ok(Mode::TurfWar),
             "Splat Zones"=>Ok(Mode::SplatZones),
             "Rainmaker"=>Ok(Mode::RainMaker),
-            "Tower Conrol"=>Ok(Mode::TowerControl),
+            "Tower Control"=>Ok(Mode::TowerControl),
             "Clam Blitz"=>Ok(Mode::ClamBlitz),
             _=>Err(anyhow!("failed to parse mode")),
         }
@@ -34,7 +34,7 @@ impl Display for Mode{
             Self::TurfWar=>"Turf War",
             Self::SplatZones=>"Splat Zones",
             Self::RainMaker=>"Rainmaker",
-            Self::TowerControl=>"Tower Conrol",
+            Self::TowerControl=>"Tower Control",
             Self::ClamBlitz=>"Clam Blitz",
         })
     }
