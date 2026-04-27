@@ -12,6 +12,7 @@ use std::time::Duration;
 // use std::str::FromStr;
 use anyhow::{bail,anyhow};
 use std::{sync::{mpsc,Arc,Mutex},fs::{File,self}};
+use tokio::sync::Mutex as TokioMutex;
 use crate::{battle::*,stats::*};
 // use std::{fs};
 
@@ -237,27 +238,34 @@ struct Config{
 
 fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_config_path:Option<String>,update_minutes:u64,s3s_run_path:PathBuf){
     let start_time=Instant::now();
+    let updating_tokens_lock=Arc::new(TokioMutex::new(()));
     // spawn game updater
     if let Some(s3s_path) =s3s_path 
     && !s3s_path.is_empty(){
+        let updating_tokens_lock=Arc::clone(&updating_tokens_lock);
+        let s3s_path=PathBuf::from(s3s_path);
+        let mut update_games_interval=tokio::time::interval(Duration::from_mins(update_minutes));
+        update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        update_games_interval.reset_after(
+            if env::args().collect::<Vec<String>>().contains(&String::from("-s")){
+                update_games_interval.period()+Duration::from_mins(1)
+            }else{
+                Duration::from_mins(1) // allow time for token to be updated
+            });
         tokio::spawn(async move {
-            let mut update_games_interval=tokio::time::interval(Duration::from_mins(update_minutes));
-            update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            update_games_interval.reset_after(
-                if env::args().collect::<Vec<String>>().contains(&String::from("-s")){
-                    update_games_interval.period()+Duration::from_secs(30)
-                }else{
-                    Duration::from_secs(30) // allow time for token to be updated
-                });
-            let s3s_path=PathBuf::from(s3s_path);
             loop{
                 //update games
-                let time=update_games_interval.tick().await;
-                println!("updating games at {} mins since start ...",(time-start_time).as_secs()/60);
-                let mut command=std::process::Command::new("python3");
-                command.args(vec!(&s3s_path.to_string_lossy(),"-o"));
-                command.current_dir(&s3s_run_path);
-                let _=command.spawn();
+                update_games_interval.tick().await;
+                let lock=updating_tokens_lock.lock().await;
+                println!("updating games at {} secs since start ...",(Instant::now()-start_time).as_secs());
+                let child=tokio::process::Command::new("python3")
+                .args(vec!(&s3s_path.to_string_lossy(),"-o"))
+                .current_dir(&s3s_run_path)
+                .spawn();
+                if let Ok(mut child)=child{
+                    let _=child.wait().await;
+                }
+                drop(lock);
             }
         });
     }
@@ -265,17 +273,22 @@ fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_confi
     if let Some(nxapi_path)=nxapi_path && !nxapi_path.is_empty()
     && let Some(s3s_config_path)=s3s_config_path && !s3s_config_path.is_empty(){
         //update tokens
+        let mut update_games_interval=tokio::time::interval(Duration::from_mins(55));
+        update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tokio::spawn(async move{
-            let mut update_games_interval=tokio::time::interval(Duration::from_hours(1));
-            update_games_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop{
-                let time=update_games_interval.tick().await;
-                println!("updating token at {} mins since start ...",(time-start_time).as_secs()/60);
-                let _ =std::process::Command::new(&nxapi_path)
+                update_games_interval.tick().await;
+                let lock=updating_tokens_lock.lock().await;
+                println!("updating token at {} secs since start ...",(Instant::now()-start_time).as_secs());
+                let child =tokio::process::Command::new(&nxapi_path)
                 .args(vec!("util","update-s3s-token",&s3s_config_path))
                 .spawn();
+                if let Ok(mut child)=child{
+                    let _=child.wait().await;
+                }
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                drop(lock);
             }
-
         });
     }
 }
