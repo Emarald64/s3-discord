@@ -32,7 +32,8 @@ pub async fn from_past_games(results_dir: &str, tracked_players:Vec<String>)->an
                 let tracked_players=Arc::clone(&tracked_players);
                 let stats=Arc::clone(&stats);
                 tasks.spawn(async move{
-                    if let Ok(mut file)=tfs::File::open(entry.path()).await{
+                    let path=entry.path();
+                    if let Ok(mut file)=tfs::File::open(&path).await{
                         let mut buf=Vec::new();
                         if let Ok(_)=file.read_to_end(&mut buf).await
                         && let Ok(map)=serde_json::from_slice(buf.as_slice()){
@@ -41,7 +42,7 @@ pub async fn from_past_games(results_dir: &str, tracked_players:Vec<String>)->an
                                     let mut stats=stats.lock().unwrap();
                                     add_game(&mut stats,&battle, &tracked_players);
                                 }
-                                Err(err)=>{dbg!(err);}
+                                Err(err)=>{println!("file:{path:#?} err:{err}");}
                             }
                         }
                     }
