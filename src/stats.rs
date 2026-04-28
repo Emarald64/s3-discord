@@ -35,10 +35,14 @@ pub async fn from_past_games(results_dir: &str, tracked_players:Vec<String>)->an
                     if let Ok(mut file)=tfs::File::open(entry.path()).await{
                         let mut buf=Vec::new();
                         if let Ok(_)=file.read_to_end(&mut buf).await
-                        && let Ok(map)=serde_json::from_slice(buf.as_slice())
-                        && let Ok(battle)=Battle::from_map(map){
-                            let mut stats=stats.lock().unwrap();
-                            add_game(&mut stats,&battle, &tracked_players);
+                        && let Ok(map)=serde_json::from_slice(buf.as_slice()){
+                            match Battle::from_map(map){
+                                Ok(battle)=>{
+                                    let mut stats=stats.lock().unwrap();
+                                    add_game(&mut stats,&battle, &tracked_players);
+                                }
+                                Err(err)=>{dbg!(err);}
+                            }
                         }
                     }
                 });
