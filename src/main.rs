@@ -264,7 +264,9 @@ fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_confi
                 .current_dir(&s3s_run_path)
                 .spawn();
                 if let Ok(mut child)=child{
-                    let _=child.wait().await;
+                    if let Err(_)= tokio::time::timeout(Duration::from_mins(15), child.wait()).await{
+                        let _=child.kill().await;
+                    }
                 }
                 drop(lock);
             }
@@ -285,7 +287,9 @@ fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_confi
                 .args(vec!("util","update-s3s-token",&s3s_config_path))
                 .spawn();
                 if let Ok(mut child)=child{
-                    let _=child.wait().await;
+                    if let Err(_)= tokio::time::timeout(Duration::from_mins(5), child.wait()).await{
+                        let _=child.kill().await;
+                    }
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 drop(lock);
