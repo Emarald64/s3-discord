@@ -12,6 +12,8 @@ pub enum Mode{
     SplatZones,
     RainMaker,
     ClamBlitz,
+    TriColor,
+    Unknown
 }
 
 impl FromStr for Mode{
@@ -23,7 +25,8 @@ impl FromStr for Mode{
             "Rainmaker"=>Ok(Mode::RainMaker),
             "Tower Control"=>Ok(Mode::TowerControl),
             "Clam Blitz"=>Ok(Mode::ClamBlitz),
-            _=>Err(anyhow!("failed to parse mode")),
+            "Tricolor Turf War"=>Ok(Mode::TriColor),
+            _=>Ok(Self::Unknown),
         }
     }
 }
@@ -36,6 +39,8 @@ impl Display for Mode{
             Self::RainMaker=>"Rainmaker",
             Self::TowerControl=>"Tower Control",
             Self::ClamBlitz=>"Clam Blitz",
+            Self::TriColor=>"Tricolor Turf War",
+            Self::Unknown=>"Unknown"
         })
     }
 }
@@ -248,8 +253,18 @@ impl Battle{
             our_score:{
                 let result=our_team.get("result").ok_or(anyhow!("Couldn't find our result"))?;
                 match mode{
-                    Mode::TurfWar=>(result.get("paintRatio").ok_or(anyhow!("Couldn't find our paint"))?.as_f64().ok_or(anyhow!("our paint is not a float???"))?*100.0) as u8,
-                    _=>result.get("score").ok_or(anyhow!("counldn't get our score"))?.as_u64().ok_or(anyhow!("our paint is not a int"))? as u8,
+                    Mode::TurfWar=>{
+                        match result.get("paintRatio"){
+                            Some(Value::Number(score))=>(score.as_f64().ok_or(anyhow!("our paint is not a float???"))?*100.0) as u8,
+                            _=>0
+                        }
+                    }
+                    _=>{
+                        match result.get("score"){
+                            Some(Value::Number(score))=>score.as_u64().ok_or(anyhow!("our paint is not a int"))? as u8,
+                            _=>0
+                        }
+                    },
                 } 
             },
             their_score: {
