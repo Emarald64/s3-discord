@@ -137,7 +137,8 @@ impl EventHandler for Handeler{
                                 println!("getting data for {}",data_values[0]);
                                 let _=if let Some(player)=battle.our_players.iter().chain(battle.their_players.iter()).find(|player|{player.name.clone()+&player.name_id==data_values[0]}){
                                     interaction.create_response(ctx, CreateInteractionResponse::Message(CreateInteractionResponseMessage::new()
-                                        .content(format!("```{player}   Weapon:{}\n{}\n\nGear:\n{}\nPrimary Ability          Primary Ability          Primary Ability\n{}\n\nSecondary Abilities      Secondary Abilities      Secondary Abilities\n{}\n{}\n{}```",
+                                        .content(format!("```{player}   {} Weapon:{}\n{}\n\nGear:\n{}\nPrimary Ability          Primary Ability          Primary Ability\n{}\n\nSecondary Abilities      Secondary Abilities      Secondary Abilities\n{}\n{}\n{}```",
+                                            player.name_id,
                                             player.weapon,
                                             player.byname,
                                             player.gears.iter().fold(String::from(""),|acc,gear|{format!("{acc}{:25}",gear.name)}),
