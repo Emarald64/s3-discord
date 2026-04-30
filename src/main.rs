@@ -293,7 +293,7 @@ fn start_auto_update(s3s_path:Option<String>,nxapi_path:Option<String>,s3s_confi
                         let _=child.kill().await;
                     }
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_secs(20)).await;
                 drop(lock);
             }
         });

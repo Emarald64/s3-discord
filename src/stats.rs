@@ -86,7 +86,7 @@ impl TotalPlayerStats{
     }
 
     pub fn to_string(&mut self)->String{
-        const HEADER:&str="Games   Win%  K/G   A/G   D/G   S/G   K/D";
+        const HEADER:&str="Games   Win%    K/G   A/G   D/G   S/G   K/D";
         let mut weapon_stats:Vec<(&String,&StatBreakdown)>=self.weapon_stats.iter().collect();
         weapon_stats.sort_by_key(|stat|{u32::MAX-stat.1.games});
         let weapon_stats_formatted=weapon_stats[..usize::min(5,weapon_stats.len())].iter().fold(String::new(), |acc,stat|{
@@ -101,9 +101,10 @@ impl TotalPlayerStats{
     }
 
     fn check_for_old_day_stats(&mut self){
-        if self.stats_date!=chrono::Local::now().date_naive(){
+        let today=chrono::Local::now().date_naive();
+        if self.stats_date<today{
             self.todays_stats=StatBreakdown::default();
-            self.stats_date=chrono::Local::now().date_naive();
+            self.stats_date=today;
         }
     }
 }
